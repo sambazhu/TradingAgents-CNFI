@@ -2,7 +2,7 @@
   <div class="app-footer">
     <div class="footer-content">
       <div class="copyright">
-        <span>© 2025 TradingAgents-CNFI v1.0.0-preview</span>
+        <span>© 2026 TradingAgents-CNFI v1.0.0-preview</span>
         <span class="rights">All rights reserved.</span>
       </div>
       <div class="disclaimer-text">

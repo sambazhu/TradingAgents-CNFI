@@ -589,7 +589,7 @@ import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import AnalysisProgressPanel from '@/components/Analysis/AnalysisProgressPanel.vue'
-import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
+import { ANALYSTS, convertAnalystNamesToOrderedIds } from '@/constants/analysts'
 import { marked } from 'marked'
 import { recommendModels } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
@@ -947,7 +947,7 @@ const submitAnalysis = async () => {
         market_type: analysisForm.market,
         analysis_date: formatLocalDate(analysisDate),
         research_depth: getDepthDescription(analysisForm.researchDepth),
-        selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
+        selected_analysts: convertAnalystNamesToOrderedIds(analysisForm.selectedAnalysts),
         include_sentiment: hasSocialAnalystSelected(),
         include_risk: analysisForm.includeRisk,
         language: analysisForm.language,
@@ -1148,7 +1148,7 @@ const startPollingTaskStatus = () => {
       console.error('获取任务状态失败:', error)
       // 继续轮询，不中断
     }
-  }, 5000) // 每5秒轮询一次
+  }, 1000) // 每1秒轮询一次，减少短节点漏显
 }
 
 // 更新进度信息

@@ -488,6 +488,10 @@ class RedisProgressTracker:
             self.progress_data['status'] = 'completed'
             self.progress_data['completed'] = True
             self.progress_data['completed_time'] = time.time()
+            self.progress_data['current_step'] = len(self.analysis_steps) - 1
+            self.progress_data['current_step_name'] = '分析完成'
+            self.progress_data['current_step_description'] = '分析流程已全部完成，正在展示最终结果'
+            self.progress_data['last_message'] = '分析已完成'
             for step in self.analysis_steps:
                 if step.status != 'failed':
                     step.status = 'completed'
@@ -504,6 +508,9 @@ class RedisProgressTracker:
             self.progress_data['failed'] = True
             self.progress_data['failed_reason'] = reason
             self.progress_data['completed_time'] = time.time()
+            self.progress_data['current_step_name'] = '分析失败'
+            self.progress_data['current_step_description'] = reason or '分析过程中发生错误'
+            self.progress_data['last_message'] = reason or '分析过程中发生错误'
             for step in self.analysis_steps:
                 if step.status not in ('completed', 'failed'):
                     step.status = 'failed'

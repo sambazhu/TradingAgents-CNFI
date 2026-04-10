@@ -285,7 +285,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
-import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
+import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToOrderedIds } from '@/constants/analysts'
 import { configApi } from '@/api/config'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -500,7 +500,7 @@ const submitBatchAnalysis = async () => {
           return markets.size === 1 ? Array.from(markets)[0] : undefined
         })(),
         research_depth: batchForm.depth,
-        selected_analysts: convertAnalystNamesToIds(batchForm.analysts),
+        selected_analysts: convertAnalystNamesToOrderedIds(batchForm.analysts),
         include_sentiment: hasBatchSocialAnalystSelected(),
         include_risk: batchForm.includeRisk,
         language: batchForm.language,
