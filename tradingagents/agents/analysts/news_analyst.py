@@ -167,7 +167,7 @@ def create_news_analyst(llm, toolkit):
                     "\n4. 您的回答必须基于工具返回的真实数据"
                     "\n"
                     "\n🔧 工具调用格式示例："
-                    "\n调用: get_stock_news_unified(stock_code='{ticker}', max_news=10)"
+                    "\n调用: get_stock_news_unified(stock_code='{ticker}', max_news=10, curr_date='{current_date}')"
                     "\n"
                     "\n⚠️ 如果您不调用工具，您的回答将被视为无效并被拒绝。"
                     "\n⚠️ 您必须先调用工具获取数据，然后基于数据进行分析。"
@@ -211,7 +211,12 @@ def create_news_analyst(llm, toolkit):
                 logger.info(f"[新闻分析师] 🔧 预处理：强制调用统一新闻工具...")
                 logger.info(f"[新闻分析师] 📊 调用参数: stock_code={ticker}, max_news=10, model_info={model_info}")
 
-                pre_fetched_news = unified_news_tool(stock_code=ticker, max_news=10, model_info=model_info)
+                pre_fetched_news = unified_news_tool(
+                    stock_code=ticker,
+                    max_news=10,
+                    model_info=model_info,
+                    curr_date=current_date,
+                )
 
                 logger.info(f"[新闻分析师] 📋 预处理返回结果长度: {len(pre_fetched_news) if pre_fetched_news else 0} 字符")
                 logger.info(f"[新闻分析师] 📄 预处理返回结果预览 (前500字符): {pre_fetched_news[:500] if pre_fetched_news else 'None'}")

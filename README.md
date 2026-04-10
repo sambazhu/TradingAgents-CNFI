@@ -53,6 +53,15 @@
 
 目标不是简单“再加一个接口”，而是让恒生聚源真正进入分析报告生成链路，而不是停留在配置层。
 
+同时，这个增强版并没有抛弃原有的 A 股数据基础设施，而是形成了更贴近真实研究场景的组合：
+
+- `Tushare` 继续承担一部分 A 股基础数据与同步能力
+- `AkShare` 继续承担公开数据抓取与补充能力
+- `BaoStock` 继续作为可选的兼容数据源
+- `Gildata / 恒生聚源` 负责更专业的数据富集与机构视角增强
+
+也就是说，本仓库的数据源策略不是“完全替换 Tushare”，而是在保留原有兼容链路的基础上，引入恒生聚源做专业增强。
+
 ### 2. 面向 A 股研究的主链路稳定性修复
 
 围绕这轮完整测试，我对主链路做了一批稳定性修复，重点包括：
@@ -97,6 +106,14 @@
 - 在默认配置和数据源管理器中加入 Gildata 可用性判断
 
 这使得系统不再只能依赖“代码里写死 token”这种不安全方式，而是具备更合理的配置来源与启停控制。
+
+对于原有数据源，这个版本仍保留并兼容：
+
+- `TUSHARE_TOKEN`
+- `TUSHARE_ENABLED`
+- `DEFAULT_CHINA_DATA_SOURCE`
+
+因此在本地或 Docker 部署时，如果你希望 A 股基础数据链路更完整，通常仍建议同时配置好 `Tushare`，而把 `Gildata` 作为更高质量的数据增强来源。
 
 ## 继承自原项目的基础能力
 
@@ -168,6 +185,10 @@ DEBUG=false
 
 # 例：DashScope / Qwen / Kimi 兼容接口相关
 DASHSCOPE_API_KEY=your_api_key
+
+# A股基础数据（推荐保留）
+TUSHARE_TOKEN=your_tushare_token
+TUSHARE_ENABLED=true
 
 # 恒生聚源
 GILDATA_API_TOKEN=your_gildata_token

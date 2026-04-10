@@ -22,7 +22,13 @@ class UnifiedNewsAnalyzer:
         """
         self.toolkit = toolkit
         
-    def get_stock_news_unified(self, stock_code: str, max_news: int = 10, model_info: str = "") -> str:
+    def get_stock_news_unified(
+        self,
+        stock_code: str,
+        max_news: int = 10,
+        model_info: str = "",
+        curr_date: str = "",
+    ) -> str:
         """
         统一新闻获取接口
         根据股票代码自动识别股票类型并获取相应新闻
@@ -31,12 +37,17 @@ class UnifiedNewsAnalyzer:
             stock_code: 股票代码
             max_news: 最大新闻数量
             model_info: 当前使用的模型信息，用于特殊处理
+            curr_date: 分析基准日（YYYY-MM-DD），为空时回退到今天
             
         Returns:
             str: 格式化的新闻内容
         """
+        if not curr_date:
+            curr_date = datetime.now().strftime("%Y-%m-%d")
+
         logger.info(f"[统一新闻工具] 开始获取 {stock_code} 的新闻，模型: {model_info}")
         logger.info(f"[统一新闻工具] 🤖 当前模型信息: {model_info}")
+        logger.info(f"[统一新闻工具] 📅 新闻分析基准日: {curr_date}")
         
         # 识别股票类型
         stock_type = self._identify_stock_type(stock_code)
@@ -44,21 +55,20 @@ class UnifiedNewsAnalyzer:
         
         # 根据股票类型调用相应的获取方法
         if stock_type == "A股":
-            result = self._get_a_share_news(stock_code, max_news, model_info)
+            result = self._get_a_share_news(stock_code, max_news, model_info, curr_date)
         elif stock_type == "港股":
-            result = self._get_hk_share_news(stock_code, max_news, model_info)
+            result = self._get_hk_share_news(stock_code, max_news, model_info, curr_date)
         elif stock_type == "美股":
-            result = self._get_us_share_news(stock_code, max_news, model_info)
+            result = self._get_us_share_news(stock_code, max_news, model_info, curr_date)
         else:
             # 默认使用A股逻辑
-            result = self._get_a_share_news(stock_code, max_news, model_info)
+            result = self._get_a_share_news(stock_code, max_news, model_info, curr_date)
 
         # ★ Gildata 新闻数据富集（仅 A 股）
         # 即使主新闻源失败，Gildata 数据仍然有价值
         if stock_type in ("A股",) and result:
             try:
                 from tradingagents.dataflows.gildata_news import enrich_news_report
-                curr_date = datetime.now().strftime("%Y-%m-%d")
                 result = enrich_news_report(stock_code, curr_date, result)
                 logger.info(f"★ [Gildata] 新闻数据富集完成: {stock_code}")
             except ImportError:
@@ -70,7 +80,6 @@ class UnifiedNewsAnalyzer:
         if stock_type == "A股" and result and "❌" not in result:
             try:
                 from tradingagents.dataflows.tushare_news import enrich_with_tushare_news
-                curr_date = datetime.now().strftime("%Y-%m-%d")
                 result = enrich_with_tushare_news(stock_code, curr_date, result)
                 logger.info(f"★ [Tushare] 新闻数据富集完成: {stock_code}")
             except ImportError:
@@ -304,12 +313,12 @@ class UnifiedNewsAnalyzer:
             logger.error(traceback.format_exc())
             return False
 
-    def _get_a_share_news(self, stock_code: str, max_news: int, model_info: str = "") -> str:
+    def _get_a_share_news(self, stock_code: str, max_news: int, model_info: str = "", curr_date: str = "") -> str:
         """获取A股新闻"""
         logger.info(f"[统一新闻工具] 获取A股 {stock_code} 新闻")
 
-        # 获取当前日期
-        curr_date = datetime.now().strftime("%Y-%m-%d")
+        if not curr_date:
+            curr_date = datetime.now().strftime("%Y-%m-%d")
 
         # 优先级0: 从数据库获取新闻（最高优先级）
         try:
@@ -389,12 +398,12 @@ class UnifiedNewsAnalyzer:
         
         return "❌ 无法获取A股新闻数据，所有新闻源均不可用"
     
-    def _get_hk_share_news(self, stock_code: str, max_news: int, model_info: str = "") -> str:
+    def _get_hk_share_news(self, stock_code: str, max_news: int, model_info: str = "", curr_date: str = "") -> str:
         """获取港股新闻"""
         logger.info(f"[统一新闻工具] 获取港股 {stock_code} 新闻")
-        
-        # 获取当前日期
-        curr_date = datetime.now().strftime("%Y-%m-%d")
+
+        if not curr_date:
+            curr_date = datetime.now().strftime("%Y-%m-%d")
         
         # 优先级1: Google新闻（港股搜索）
         try:
@@ -435,12 +444,12 @@ class UnifiedNewsAnalyzer:
         
         return "❌ 无法获取港股新闻数据，所有新闻源均不可用"
     
-    def _get_us_share_news(self, stock_code: str, max_news: int, model_info: str = "") -> str:
+    def _get_us_share_news(self, stock_code: str, max_news: int, model_info: str = "", curr_date: str = "") -> str:
         """获取美股新闻"""
         logger.info(f"[统一新闻工具] 获取美股 {stock_code} 新闻")
-        
-        # 获取当前日期
-        curr_date = datetime.now().strftime("%Y-%m-%d")
+
+        if not curr_date:
+            curr_date = datetime.now().strftime("%Y-%m-%d")
         
         # 优先级1: OpenAI全球新闻
         try:
@@ -578,7 +587,12 @@ def create_unified_news_tool(toolkit):
     """创建统一新闻工具函数"""
     analyzer = UnifiedNewsAnalyzer(toolkit)
     
-    def get_stock_news_unified(stock_code: str, max_news: int = 100, model_info: str = ""):
+    def get_stock_news_unified(
+        stock_code: str,
+        max_news: int = 100,
+        model_info: str = "",
+        curr_date: str = "",
+    ):
         """
         统一新闻获取工具
         
@@ -586,6 +600,7 @@ def create_unified_news_tool(toolkit):
             stock_code (str): 股票代码 (支持A股如000001、港股如0700.HK、美股如AAPL)
             max_news (int): 最大新闻数量，默认100
             model_info (str): 当前使用的模型信息，用于特殊处理
+            curr_date (str): 新闻分析基准日（YYYY-MM-DD）
         
         Returns:
             str: 格式化的新闻内容
@@ -593,7 +608,7 @@ def create_unified_news_tool(toolkit):
         if not stock_code:
             return "❌ 错误: 未提供股票代码"
         
-        return analyzer.get_stock_news_unified(stock_code, max_news, model_info)
+        return analyzer.get_stock_news_unified(stock_code, max_news, model_info, curr_date)
     
     # 设置工具属性
     get_stock_news_unified.name = "get_stock_news_unified"

@@ -3,6 +3,10 @@ import json
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+from tradingagents.agents.utils.llm_invocation import (
+    invoke_llm_with_retry,
+    trim_prompt_text,
+)
 logger = get_logger("default")
 
 
@@ -14,6 +18,15 @@ def create_neutral_debator(llm):
 
         current_risky_response = risk_debate_state.get("current_risky_response", "")
         current_safe_response = risk_debate_state.get("current_safe_response", "")
+        history_for_prompt = trim_prompt_text(
+            history, 12000, label="Neutral Analyst history", logger=logger
+        )
+        risky_for_prompt = trim_prompt_text(
+            current_risky_response, 3000, label="Neutral Analyst risky_response", logger=logger
+        )
+        safe_for_prompt = trim_prompt_text(
+            current_safe_response, 3000, label="Neutral Analyst safe_response", logger=logger
+        )
 
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
@@ -50,20 +63,35 @@ def create_neutral_debator(llm):
 社交媒体情绪报告：{sentiment_report}
 最新世界事务报告：{news_report}
 公司基本面报告：{fundamentals_report}
-以下是当前对话历史：{history} 以下是激进分析师的最后回应：{current_risky_response} 以下是安全分析师的最后回应：{current_safe_response}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
+以下是当前对话历史：{history_for_prompt} 以下是激进分析师的最后回应：{risky_for_prompt} 以下是安全分析师的最后回应：{safe_for_prompt}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
 
 通过批判性地分析双方来积极参与，解决激进和保守论点中的弱点，倡导更平衡的方法。挑战他们的每个观点，说明为什么适度风险策略可能提供两全其美的效果，既提供增长潜力又防范极端波动。专注于辩论而不是简单地呈现数据，旨在表明平衡的观点可以带来最可靠的结果。请用中文以对话方式输出，就像您在说话一样，不使用任何特殊格式。"""
 
         logger.info(f"⏱️ [Neutral Analyst] 开始调用LLM...")
         llm_start_time = time.time()
+        fallback_content = (
+            "从平衡视角看，更合适的做法是保留参与机会，但同步降低执行强度。"
+            "建议在确认趋势延续前维持中等仓位，并结合明确止损与目标位，兼顾收益弹性和回撤控制。"
+        )
 
-        response = llm.invoke(prompt)
+        try:
+            response = invoke_llm_with_retry(
+                llm,
+                prompt,
+                logger=logger,
+                role_name="Neutral Analyst",
+                max_retries=2,
+            )
+            response_content = response.content
+        except Exception as exc:
+            logger.error(f"❌ [Neutral Analyst] 多次调用失败，使用降级发言: {exc}")
+            response_content = fallback_content
 
         llm_elapsed = time.time() - llm_start_time
         logger.info(f"⏱️ [Neutral Analyst] LLM调用完成，耗时: {llm_elapsed:.2f}秒")
-        logger.info(f"📝 [Neutral Analyst] 响应长度: {len(response.content):,} 字符")
+        logger.info(f"📝 [Neutral Analyst] 响应长度: {len(response_content):,} 字符")
 
-        argument = f"Neutral Analyst: {response.content}"
+        argument = f"Neutral Analyst: {response_content}"
 
         new_count = risk_debate_state["count"] + 1
         logger.info(f"⚖️ [中性风险分析师] 发言完成，计数: {risk_debate_state['count']} -> {new_count}")
