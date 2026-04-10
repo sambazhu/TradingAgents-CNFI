@@ -315,19 +315,28 @@ class RedisProgressTracker:
                     self.progress_data['last_message'] = str(progress_update)
                     self.progress_data['last_update'] = time.time()
 
+            explicit_step_index = self._resolve_explicit_step_index()
+
             # 根据进度百分比自动更新步骤状态
             progress_pct = self.progress_data.get('progress_percentage', 0)
             self._update_steps_by_progress(progress_pct)
 
-            # 获取当前步骤索引
-            current_step_index = self._detect_current_step()
+            # 如果能从真实消息中识别步骤，则优先用真实步骤覆盖“按百分比猜测”的结果
+            if explicit_step_index is not None:
+                self._apply_explicit_step_index(explicit_step_index)
+                current_step_index = explicit_step_index
+            else:
+                current_step_index = self._detect_current_step()
+
             self.progress_data['current_step'] = current_step_index
 
-            # 更新当前步骤的名称和描述
+            # 更新当前步骤的名称和描述；若调用方已显式传入，则保留显式值
             if 0 <= current_step_index < len(self.analysis_steps):
                 current_step_obj = self.analysis_steps[current_step_index]
-                self.progress_data['current_step_name'] = current_step_obj.name
-                self.progress_data['current_step_description'] = current_step_obj.description
+                if not self.progress_data.get('current_step_name'):
+                    self.progress_data['current_step_name'] = current_step_obj.name
+                if not self.progress_data.get('current_step_description'):
+                    self.progress_data['current_step_description'] = current_step_obj.description
 
             elapsed, remaining, est_total = self._calculate_time_estimates()
             self.progress_data['elapsed_time'] = elapsed
@@ -343,6 +352,59 @@ class RedisProgressTracker:
         except Exception as e:
             logger.error(f"[RedisProgress] update failed: {self.task_id} - {e}")
             return self.progress_data
+
+    def _normalize_step_text(self, value: str) -> str:
+        if not value:
+            return ""
+        normalized = str(value).strip()
+        for token in ("正在分析", "构建论据", "识别风险", "形成共识", "制定策略", "进行中"):
+            normalized = normalized.replace(token, "")
+        return normalized.strip()
+
+    def _find_step_index_by_name(self, step_name: str) -> Optional[int]:
+        if not step_name:
+            return None
+
+        normalized_target = self._normalize_step_text(step_name)
+        if not normalized_target:
+            return None
+
+        for index, step in enumerate(self.analysis_steps):
+            normalized_name = self._normalize_step_text(step.name)
+            if normalized_name == normalized_target:
+                return index
+            if normalized_target in normalized_name or normalized_name in normalized_target:
+                return index
+        return None
+
+    def _resolve_explicit_step_index(self) -> Optional[int]:
+        explicit_name = self.progress_data.get('current_step_name')
+        index = self._find_step_index_by_name(explicit_name)
+        if index is not None:
+            return index
+
+        message_name = self.progress_data.get('last_message')
+        return self._find_step_index_by_name(message_name)
+
+    def _apply_explicit_step_index(self, step_index: int) -> None:
+        current_time = time.time()
+
+        for index, step in enumerate(self.analysis_steps):
+            if step.status == 'failed':
+                continue
+            if index < step_index:
+                step.status = 'completed'
+                step.end_time = step.end_time or current_time
+            elif index == step_index:
+                step.status = 'current'
+                step.start_time = step.start_time or current_time
+            else:
+                if step.status != 'completed':
+                    step.status = 'pending'
+
+        current_step = self.analysis_steps[step_index]
+        self.progress_data['current_step_name'] = current_step.name
+        self.progress_data['current_step_description'] = current_step.description
 
     def _update_steps_by_progress(self, progress_pct: float) -> None:
         """根据进度百分比自动更新步骤状态"""
@@ -426,6 +488,10 @@ class RedisProgressTracker:
             self.progress_data['status'] = 'completed'
             self.progress_data['completed'] = True
             self.progress_data['completed_time'] = time.time()
+            self.progress_data['current_step'] = len(self.analysis_steps) - 1
+            self.progress_data['current_step_name'] = '分析完成'
+            self.progress_data['current_step_description'] = '分析流程已全部完成，正在展示最终结果'
+            self.progress_data['last_message'] = '分析已完成'
             for step in self.analysis_steps:
                 if step.status != 'failed':
                     step.status = 'completed'
@@ -442,6 +508,9 @@ class RedisProgressTracker:
             self.progress_data['failed'] = True
             self.progress_data['failed_reason'] = reason
             self.progress_data['completed_time'] = time.time()
+            self.progress_data['current_step_name'] = '分析失败'
+            self.progress_data['current_step_description'] = reason or '分析过程中发生错误'
+            self.progress_data['last_message'] = reason or '分析过程中发生错误'
             for step in self.analysis_steps:
                 if step.status not in ('completed', 'failed'):
                     step.status = 'failed'
@@ -465,8 +534,15 @@ class RedisProgressTracker:
                 'remaining_time': self.progress_data.get('remaining_time', 0),
                 'estimated_total_time': self.progress_data.get('estimated_total_time', 0),
                 'progress_percentage': self.progress_data.get('progress_percentage', 0),
+                'progress': self.progress_data.get('progress_percentage', 0),
                 'status': self.progress_data.get('status', 'pending'),
-                'current_step': self.progress_data.get('current_step')
+                'current_step': self.progress_data.get('current_step'),
+                'current_step_name': self.progress_data.get('current_step_name', ''),
+                'current_step_description': self.progress_data.get('current_step_description', ''),
+                'last_message': self.progress_data.get('last_message', ''),
+                'message': self.progress_data.get('last_message', ''),
+                'last_update': self.progress_data.get('last_update', self.progress_data.get('start_time')),
+                'total_steps': self.progress_data.get('total_steps', len(self.analysis_steps))
             }
         except Exception as e:
             logger.error(f"[RedisProgress] to_dict failed: {self.task_id} - {e}")

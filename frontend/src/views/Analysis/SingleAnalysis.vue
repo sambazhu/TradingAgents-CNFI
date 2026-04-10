@@ -218,116 +218,12 @@
 
               <!-- 分析进度显示 -->
               <div v-if="analysisStatus === 'running'" class="progress-section">
-                <el-card class="progress-card" shadow="hover">
-                  <template #header>
-                    <div class="progress-header">
-                      <h4>
-                        <el-icon class="rotating-icon">
-                          <Loading />
-                        </el-icon>
-                        分析进行中...
-                      </h4>
-                      <!-- 任务ID已隐藏 -->
-                      <!-- <el-tag type="warning">{{ currentTaskId }}</el-tag> -->
-                    </div>
-                  </template>
-
-                  <div class="progress-content">
-                    <!-- 总体进度信息 -->
-                    <div class="overall-progress-info">
-                      <div class="progress-stats">
-                        <!-- 当前步骤已隐藏 -->
-                        <!--
-                        <div class="stat-item">
-                          <div class="stat-label">当前步骤</div>
-                          <div class="stat-value">{{ progressInfo.currentStep || '初始化中...' }}</div>
-                        </div>
-                        -->
-                        <!-- 整体进度已隐藏 -->
-                        <!--
-                        <div class="stat-item">
-                          <div class="stat-label">整体进度</div>
-                          <div class="stat-value">{{ progressInfo.progress.toFixed(1) }}%</div>
-                        </div>
-                        -->
-                        <div class="stat-item">
-                          <div class="stat-label">已用时间</div>
-                          <div class="stat-value">{{ formatTime(progressInfo.elapsedTime) }}</div>
-                        </div>
-                        <div class="stat-item">
-                          <div class="stat-label">预计剩余</div>
-                          <div class="stat-value">{{ formatTime(progressInfo.remainingTime) }}</div>
-                        </div>
-                        <div class="stat-item">
-                          <div class="stat-label">预计总时长</div>
-                          <div class="stat-value">{{ formatTime(progressInfo.totalTime) }}</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 进度条 -->
-                    <div class="progress-bar-section">
-                      <el-progress
-                        :percentage="Math.round(progressInfo.progress)"
-                        :stroke-width="12"
-                        :show-text="true"
-                        :status="getProgressStatus()"
-                        class="main-progress-bar"
-                      />
-                    </div>
-
-                    <!-- 当前任务详情 -->
-                    <div class="current-task-info">
-                      <div class="task-title">
-                        <el-icon class="task-icon">
-                          <Loading />
-                        </el-icon>
-                        {{ progressInfo.currentStep || '正在初始化分析引擎...' }}
-                      </div>
-                      <div
-                        class="task-description"
-                        style="white-space: pre-wrap; line-height: 1.6;"
-                      >
-                        {{ progressInfo.currentStepDescription || progressInfo.message || 'AI正在根据您的要求重点分析相关内容' }}
-                      </div>
-                    </div>
-
-                    <!-- 分析步骤显示 - 已隐藏 -->
-                    <!--
-                    <div v-if="analysisSteps.length > 0" class="analysis-steps">
-                      <h5 class="steps-title">📋 分析步骤</h5>
-                      <div class="steps-container">
-                        <div
-                          v-for="(step, index) in analysisSteps"
-                          :key="index"
-                          class="step-item"
-                          :class="{
-                            'step-completed': step.status === 'completed',
-                            'step-current': step.status === 'current',
-                            'step-pending': step.status === 'pending'
-                          }"
-                        >
-                          <div class="step-icon">
-                            <el-icon v-if="step.status === 'completed'" class="completed-icon">
-                              <Check />
-                            </el-icon>
-                            <el-icon v-else-if="step.status === 'current'" class="current-icon rotating-icon">
-                              <Loading />
-                            </el-icon>
-                            <el-icon v-else class="pending-icon">
-                              <Clock />
-                            </el-icon>
-                          </div>
-                          <div class="step-content">
-                            <div class="step-title">{{ step.title }}</div>
-                            <div class="step-description">{{ step.description }}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    -->
-                  </div>
-                </el-card>
+                <AnalysisProgressPanel
+                  :progress-info="progressInfo"
+                  :status="analysisStatus"
+                  :task-id="currentTaskId"
+                  :show-task-id="false"
+                />
               </div>
             </el-form>
           </el-card>
@@ -692,10 +588,11 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
-import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
+import AnalysisProgressPanel from '@/components/Analysis/AnalysisProgressPanel.vue'
+import { ANALYSTS, convertAnalystNamesToOrderedIds } from '@/constants/analysts'
 import { marked } from 'marked'
-import { recommendModels, validateModels, type ModelRecommendationResponse } from '@/api/modelCapabilities'
-import { validateStockCode, getStockCodeFormatHelp, getStockCodeExamples } from '@/utils/stockValidator'
+import { recommendModels } from '@/api/modelCapabilities'
+import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
 
 // 配置marked选项
@@ -720,7 +617,6 @@ interface AnalysisForm {
 }
 
 // 使用store
-const appStore = useAppStore()
 const authStore = useAuthStore()
 const router = useRouter()
 const route = useRoute()
@@ -1051,7 +947,7 @@ const submitAnalysis = async () => {
         market_type: analysisForm.market,
         analysis_date: formatLocalDate(analysisDate),
         research_depth: getDepthDescription(analysisForm.researchDepth),
-        selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
+        selected_analysts: convertAnalystNamesToOrderedIds(analysisForm.selectedAnalysts),
         include_sentiment: hasSocialAnalystSelected(),
         include_risk: analysisForm.includeRisk,
         language: analysisForm.language,
@@ -1252,7 +1148,7 @@ const startPollingTaskStatus = () => {
       console.error('获取任务状态失败:', error)
       // 继续轮询，不中断
     }
-  }, 5000) // 每5秒轮询一次
+  }, 1000) // 每1秒轮询一次，减少短节点漏显
 }
 
 // 更新进度信息
@@ -1802,7 +1698,7 @@ const goSimOrder = async () => {
       confirmButtonText: '确认下单',
       cancelButtonText: '取消',
       type: 'warning',
-      beforeClose: (action, instance, done) => {
+      beforeClose: (action, _instance, done) => {
         if (action === 'confirm') {
           // 验证输入
           if (tradeForm.quantity < 100 || tradeForm.quantity % 100 !== 0) {
@@ -1898,37 +1794,6 @@ document.addEventListener('visibilitychange', handleVisibilityChange)
 const getDepthDescription = (depth: number) => {
   const descriptions = ['快速', '基础', '标准', '深度', '全面']
   return descriptions[depth - 1] || '标准'
-}
-
-// 获取进度条状态
-const getProgressStatus = () => {
-  if (analysisStatus.value === 'completed') {
-    return 'success'
-  } else if (analysisStatus.value === 'failed') {
-    return 'exception'
-  } else if (analysisStatus.value === 'running') {
-    return '' // 默认状态，显示蓝色进度条
-  }
-  return ''
-}
-
-// 简单的时间格式化方法（只用于显示后端返回的时间）
-const formatTime = (seconds: number) => {
-  if (!seconds || seconds <= 0) {
-    return '计算中...'
-  }
-
-  if (seconds < 60) {
-    return `${Math.floor(seconds)}秒`
-  } else if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60)
-    const remainingSeconds = Math.floor(seconds % 60)
-    return remainingSeconds > 0 ? `${minutes}分${remainingSeconds}秒` : `${minutes}分钟`
-  } else {
-    const hours = Math.floor(seconds / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-    return `${hours}小时${minutes}分钟`
-  }
 }
 
 // 更新分析步骤状态
@@ -2177,14 +2042,6 @@ const getCapabilityTagType = (level: number): 'success' | 'info' | 'warning' | '
 const isQuickAnalysisRole = (roles: string[] | undefined): boolean => {
   if (!roles || !Array.isArray(roles)) return false
   return roles.includes('quick_analysis') || roles.includes('both')
-}
-
-/**
- * 判断是否适合深度分析
- */
-const isDeepAnalysisRole = (roles: string[] | undefined): boolean => {
-  if (!roles || !Array.isArray(roles)) return false
-  return roles.includes('deep_analysis') || roles.includes('both')
 }
 
 /**

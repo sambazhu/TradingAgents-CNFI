@@ -32,6 +32,8 @@ class TaskState:
     progress: int = 0
     message: str = ""
     current_step: str = ""
+    current_step_name: str = ""
+    current_step_description: str = ""
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     result_data: Optional[Dict[str, Any]] = None
@@ -184,6 +186,8 @@ class MemoryStateManager:
         progress: Optional[int] = None,
         message: Optional[str] = None,
         current_step: Optional[str] = None,
+        current_step_name: Optional[str] = None,
+        current_step_description: Optional[str] = None,
         result_data: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None
     ) -> bool:
@@ -202,6 +206,10 @@ class MemoryStateManager:
                 task.message = message
             if current_step is not None:
                 task.current_step = current_step
+            if current_step_name is not None:
+                task.current_step_name = current_step_name
+            if current_step_description is not None:
+                task.current_step_description = current_step_description
             if result_data is not None:
                 # 🔍 调试：检查保存到内存的result_data
                 logger.info(f"🔍 [MEMORY] 保存result_data到内存: {task_id}")
@@ -232,6 +240,8 @@ class MemoryStateManager:
                         "progress": task.progress,
                         "message": task.message,
                         "current_step": task.current_step,
+                        "current_step_name": task.current_step_name,
+                        "current_step_description": task.current_step_description,
                         "timestamp": datetime.now().isoformat()
                     }
                     # 异步推送，不等待完成

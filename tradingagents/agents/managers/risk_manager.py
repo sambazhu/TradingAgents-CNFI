@@ -3,6 +3,10 @@ import json
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+from tradingagents.agents.utils.llm_invocation import (
+    invoke_llm_with_retry,
+    trim_prompt_text,
+)
 logger = get_logger("default")
 
 
@@ -32,6 +36,13 @@ def create_risk_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
+        history_for_prompt = trim_prompt_text(
+            history, 15000, label="Risk Manager history", logger=logger
+        )
+        memory_for_prompt = trim_prompt_text(
+            past_memory_str, 4000, label="Risk Manager memory", logger=logger
+        )
+
         prompt = f"""作为风险管理委员会主席和辩论主持人，您的目标是评估三位风险分析师——激进、中性和安全/保守——之间的辩论，并确定交易员的最佳行动方案。力求清晰和果断。
 
 **评级量表**（必须使用以下之一）：
@@ -46,7 +57,7 @@ def create_risk_manager(llm, memory):
 2. **总结关键论点**：提取每位分析师的最强观点，重点关注与背景的相关性。
 3. **提供理由**：用辩论中的直接引用和反驳论点支持您的建议。
 4. **完善交易员计划**：从交易员的原始计划**{trader_plan}**开始，根据分析师的见解进行调整。
-5. **从过去的错误中学习**：使用**{past_memory_str}**中的经验教训来解决先前的误判，改进您现在做出的决策。
+5. **从过去的错误中学习**：使用**{memory_for_prompt}**中的经验教训来解决先前的误判，改进您现在做出的决策。
 
 交付成果：
 1. **评级**: 明确给出 买入/增持/持有/减持/卖出 之一。
@@ -56,7 +67,7 @@ def create_risk_manager(llm, memory):
 ---
 
 **分析师辩论历史：**
-{history}
+{history_for_prompt}
 
 ---
 
@@ -74,62 +85,34 @@ def create_risk_manager(llm, memory):
         logger.info(f"   - 总 Prompt 长度: {prompt_length} 字符")
         logger.info(f"   - 估算输入 Token: ~{estimated_tokens} tokens")
 
-        # 增强的LLM调用，包含错误处理和重试机制
-        max_retries = 3
-        retry_count = 0
         response_content = ""
+        try:
+            start_time = time.time()
+            response = invoke_llm_with_retry(
+                llm,
+                prompt,
+                logger=logger,
+                role_name="Risk Manager",
+                max_retries=3,
+            )
+            elapsed_time = time.time() - start_time
+            response_content = response.content.strip()
 
-        while retry_count < max_retries:
-            try:
-                logger.info(f"🔄 [Risk Manager] 调用LLM生成交易决策 (尝试 {retry_count + 1}/{max_retries})")
+            response_length = len(response_content)
+            estimated_output_tokens = int(response_length / 1.8)
+            usage_info = ""
+            if hasattr(response, 'response_metadata') and response.response_metadata:
+                metadata = response.response_metadata
+                if 'token_usage' in metadata:
+                    token_usage = metadata['token_usage']
+                    usage_info = f", 实际Token: 输入={token_usage.get('prompt_tokens', 'N/A')} 输出={token_usage.get('completion_tokens', 'N/A')} 总计={token_usage.get('total_tokens', 'N/A')}"
 
-                # ⏱️ 记录开始时间
-                start_time = time.time()
+            logger.info(f"⏱️ [Risk Manager] LLM调用耗时: {elapsed_time:.2f}秒")
+            logger.info(f"📊 [Risk Manager] 响应统计: {response_length} 字符, 估算~{estimated_output_tokens} tokens{usage_info}")
+            logger.info(f"✅ [Risk Manager] LLM调用成功")
+        except Exception as e:
+            logger.error(f"❌ [Risk Manager] 多次调用失败，将使用默认决策: {str(e)}")
 
-                response = llm.invoke(prompt)
-
-                # ⏱️ 记录结束时间
-                elapsed_time = time.time() - start_time
-                
-                if response and hasattr(response, 'content') and response.content:
-                    response_content = response.content.strip()
-
-                    # 📊 统计响应信息
-                    response_length = len(response_content)
-                    estimated_output_tokens = int(response_length / 1.8)
-
-                    # 尝试获取实际的 token 使用情况（如果 LLM 返回了）
-                    usage_info = ""
-                    if hasattr(response, 'response_metadata') and response.response_metadata:
-                        metadata = response.response_metadata
-                        if 'token_usage' in metadata:
-                            token_usage = metadata['token_usage']
-                            usage_info = f", 实际Token: 输入={token_usage.get('prompt_tokens', 'N/A')} 输出={token_usage.get('completion_tokens', 'N/A')} 总计={token_usage.get('total_tokens', 'N/A')}"
-
-                    logger.info(f"⏱️ [Risk Manager] LLM调用耗时: {elapsed_time:.2f}秒")
-                    logger.info(f"📊 [Risk Manager] 响应统计: {response_length} 字符, 估算~{estimated_output_tokens} tokens{usage_info}")
-
-                    if len(response_content) > 10:  # 确保响应有实质内容
-                        logger.info(f"✅ [Risk Manager] LLM调用成功")
-                        break
-                    else:
-                        logger.warning(f"⚠️ [Risk Manager] LLM响应内容过短: {len(response_content)} 字符")
-                        response_content = ""
-                else:
-                    logger.warning(f"⚠️ [Risk Manager] LLM响应为空或无效")
-                    response_content = ""
-
-            except Exception as e:
-                elapsed_time = time.time() - start_time
-                logger.error(f"❌ [Risk Manager] LLM调用失败 (尝试 {retry_count + 1}): {str(e)}")
-                logger.error(f"⏱️ [Risk Manager] 失败前耗时: {elapsed_time:.2f}秒")
-                response_content = ""
-            
-            retry_count += 1
-            if retry_count < max_retries and not response_content:
-                logger.info(f"🔄 [Risk Manager] 等待2秒后重试...")
-                time.sleep(2)
-        
         # 如果所有重试都失败，生成默认决策
         if not response_content:
             logger.error(f"❌ [Risk Manager] 所有LLM调用尝试失败，使用默认决策")

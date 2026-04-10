@@ -83,9 +83,21 @@
         </div>
       </div>
 
-      <el-table :data="filteredList" v-loading="loading" style="width: 100%" @selection-change="onSelectionChange">
+      <el-table
+        :data="filteredList"
+        v-loading="loading"
+        style="width: 100%"
+        @selection-change="onSelectionChange"
+        @row-click="handleRowClick"
+      >
         <el-table-column type="selection" width="50" />
-        <el-table-column prop="task_id" label="任务ID" width="220" />
+        <el-table-column prop="task_id" label="任务ID" width="220">
+          <template #default="{ row }">
+            <el-button type="primary" text @click.stop="openTaskDetail(row)">
+              {{ row.task_id }}
+            </el-button>
+          </template>
+        </el-table-column>
         <el-table-column prop="stock_code" label="股票代码" width="120" />
         <el-table-column prop="stock_name" label="股票名称" width="150" />
         <el-table-column label="状态" width="110">
@@ -105,12 +117,13 @@
         </el-table-column>
         <el-table-column label="操作" width="350" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.status==='completed'" type="text" size="small" @click="openResult(row)">查看结果</el-button>
-            <el-button v-if="row.status==='completed'" type="text" size="small" @click="openReport(row)">报告详情</el-button>
-            <el-button v-if="row.status==='failed'" type="text" size="small" @click="showErrorDetail(row)">查看错误</el-button>
-            <el-button v-if="row.status==='failed'" type="text" size="small" @click="retryTask(row)">重试</el-button>
-            <el-button v-if="row.status==='processing' || row.status==='running' || row.status==='pending'" type="text" size="small" @click="markAsFailed(row)">标记失败</el-button>
-            <el-button type="text" size="small" @click="deleteTask(row)" style="color: #f56c6c;">删除</el-button>
+            <el-button type="text" size="small" @click.stop="openTaskDetail(row)">任务详情</el-button>
+            <el-button v-if="row.status==='completed'" type="text" size="small" @click.stop="openResult(row)">查看结果</el-button>
+            <el-button v-if="row.status==='completed'" type="text" size="small" @click.stop="openReport(row)">报告详情</el-button>
+            <el-button v-if="row.status==='failed'" type="text" size="small" @click.stop="showErrorDetail(row)">查看错误</el-button>
+            <el-button v-if="row.status==='failed'" type="text" size="small" @click.stop="retryTask(row)">重试</el-button>
+            <el-button v-if="row.status==='processing' || row.status==='running' || row.status==='pending'" type="text" size="small" @click.stop="markAsFailed(row)">标记失败</el-button>
+            <el-button type="text" size="small" @click.stop="deleteTask(row)" style="color: #f56c6c;">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -149,15 +162,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Refresh, Download } from '@element-plus/icons-vue'
 import { analysisApi } from '@/api/analysis'
-import { marked } from 'marked'
 import TaskResultDialog from '@/components/Global/TaskResultDialog.vue'
 import TaskReportDialog from '@/components/Global/TaskReportDialog.vue'
-
-
-marked.setOptions({ breaks: true, gfm: true })
-const renderMarkdown = (s: string) => {
-  try { return marked.parse(s||'') as string } catch { return s }
-}
 
 const router = useRouter()
 const route = useRoute()
@@ -364,11 +370,31 @@ const openResult = async (row:any) => {
 
 const openReport = (row:any) => {
   const id = row?.task_id || row?.analysis_id || row?.id
-  if (!id) return ElMessage.warning('未找到报告ID')
+  if (!id) {
+    ElMessage.warning('未找到报告ID')
+    return
+  }
   router.push({ name: 'ReportDetail', params: { id } })
 }
 
-const retryTask = (row:any) => { ElMessage.info('重试功能待实现') }
+const openTaskDetail = (row: any) => {
+  const id = row?.task_id || row?.analysis_id || row?.id
+  if (!id) {
+    ElMessage.warning('未找到任务ID')
+    return
+  }
+  router.push({ name: 'TaskDetail', params: { taskId: id } })
+}
+
+const handleRowClick = (row: any, _column: any, event: Event) => {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.el-button') || target?.closest('.el-checkbox')) {
+    return
+  }
+  openTaskDetail(row)
+}
+
+const retryTask = (_row:any) => { ElMessage.info('重试功能待实现') }
 
 // 显示错误详情
 const showErrorDetail = async (row: any) => {
@@ -518,13 +544,13 @@ onUnmounted(() => {
 
 const getStatusType = (status:string): 'success' | 'info' | 'warning' | 'danger' => {
   const map: Record<string,'success'|'info'|'warning'|'danger'> = {
-    pending: 'info', processing: 'warning', completed: 'success', failed: 'danger', cancelled: 'info'
+    pending: 'info', processing: 'warning', running: 'warning', completed: 'success', failed: 'danger', cancelled: 'info'
   }
   return map[status] || 'info'
 }
 import { formatDateTime } from '@/utils/datetime'
 
-const getStatusText = (status:string) => ({ pending:'等待中', processing:'处理中', completed:'已完成', failed:'失败', cancelled:'已取消' } as any)[status] || status
+const getStatusText = (status:string) => ({ pending:'等待中', processing:'处理中', running:'进行中', completed:'已完成', failed:'失败', cancelled:'已取消' } as any)[status] || status
 const formatTime = (t:string) => t ? formatDateTime(t) : '-'
 </script>
 

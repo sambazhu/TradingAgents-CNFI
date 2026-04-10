@@ -5,7 +5,7 @@
       <div class="hero-content">
         <div class="hero-text">
           <h1 class="hero-title">
-            TradingAgents-CN
+            TradingAgents-CNFI
             <span class="version-badge">v1.0.0-preview</span>
           </h1>
           <p class="hero-subtitle">
@@ -273,7 +273,7 @@
 
           <div class="origin-description">
             <p>
-              <strong>TradingAgents-CN</strong> 是基于 <strong>TradingAgents</strong> 项目开发的中文本地化版本。
+              <strong>TradingAgents-CNFI</strong> 是基于 <strong>TradingAgents</strong> 项目开发，并面向中国金融机构增强场景继续扩展的数据源与机构化能力版本。
               原项目由 Tauric Research 团队开发，是一个创新的多智能体股票分析框架。
             </p>
             <p>
@@ -290,7 +290,7 @@
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>增强的数据源：</strong>集成 Tushare、AKShare 等中国市场数据源</span>
+                <span><strong>增强的数据源：</strong>集成 Tushare、AKShare、恒生聚源等更专业的中国市场数据源</span>
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
@@ -397,7 +397,7 @@
             <el-icon><ChatDotRound /></el-icon>
           </div>
           <h4>微信公众号</h4>
-          <p>TradingAgents-CN</p>
+          <p>TradingAgents-CNFI</p>
           <span class="contact-desc">最新动态和使用教程</span>
         </div>
 
@@ -422,7 +422,7 @@
     <!-- Footer -->
     <div class="footer-section">
       <div class="footer-content">
-        <p>&copy; 2025 TradingAgents-CN. All rights reserved.</p>
+        <p>&copy; 2026 TradingAgents-CNFI. All rights reserved.</p>
         <p>许可证说明：开源组件遵循 Apache 2.0；前端与后端采用专有许可证（个人学习/研究免费，商业使用需授权）。</p>
       </div>
     </div>

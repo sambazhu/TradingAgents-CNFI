@@ -66,9 +66,23 @@ export const ANALYST_NAME_TO_ID_MAP: Record<string, string> = {
   '社媒分析师': 'social'
 }
 
+// 主链固定顺序
+export const ANALYST_EXECUTION_ORDER = [
+  'market',
+  'fundamentals',
+  'news',
+  'social'
+]
+
 // 将中文分析师名称转换为英文ID
 export const convertAnalystNamesToIds = (names: string[]): string[] => {
   return names.map(name => ANALYST_NAME_TO_ID_MAP[name] || name)
+}
+
+// 将当前勾选的分析师按主链固定顺序输出，只保留实际勾选项
+export const convertAnalystNamesToOrderedIds = (names: string[]): string[] => {
+  const selectedIds = new Set(convertAnalystNamesToIds(names))
+  return ANALYST_EXECUTION_ORDER.filter(id => selectedIds.has(id))
 }
 
 // 将英文ID转换为中文分析师名称

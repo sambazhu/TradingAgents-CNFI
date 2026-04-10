@@ -3,6 +3,10 @@ import json
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+from tradingagents.agents.utils.llm_invocation import (
+    invoke_llm_with_retry,
+    trim_prompt_text,
+)
 logger = get_logger("default")
 
 
@@ -14,6 +18,15 @@ def create_risky_debator(llm):
 
         current_safe_response = risk_debate_state.get("current_safe_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
+        history_for_prompt = trim_prompt_text(
+            history, 12000, label="Risky Analyst history", logger=logger
+        )
+        safe_for_prompt = trim_prompt_text(
+            current_safe_response, 3000, label="Risky Analyst safe_response", logger=logger
+        )
+        neutral_for_prompt = trim_prompt_text(
+            current_neutral_response, 3000, label="Risky Analyst neutral_response", logger=logger
+        )
 
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
@@ -46,20 +59,34 @@ def create_risky_debator(llm):
 社交媒体情绪报告：{sentiment_report}
 最新世界事务报告：{news_report}
 公司基本面报告：{fundamentals_report}
-以下是当前对话历史：{history} 以下是保守分析师的最后论点：{current_safe_response} 以下是中性分析师的最后论点：{current_neutral_response}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
+以下是当前对话历史：{history_for_prompt} 以下是保守分析师的最后论点：{safe_for_prompt} 以下是中性分析师的最后论点：{neutral_for_prompt}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
 
 积极参与，解决提出的任何具体担忧，反驳他们逻辑中的弱点，并断言承担风险的好处以超越市场常规。专注于辩论和说服，而不仅仅是呈现数据。挑战每个反驳点，强调为什么高风险方法是最优的。请用中文以对话方式输出，就像您在说话一样，不使用任何特殊格式。"""
 
         logger.info(f"⏱️ [Risky Analyst] 开始调用LLM...")
-        import time
         llm_start_time = time.time()
+        fallback_content = (
+            "从激进视角看，虽然当前模型调用出现延迟，但高股息与估值修复空间仍提供了收益弹性。"
+            "若继续执行交易，建议仅以小仓位试探，并把止损纪律前置，以便在保留上行机会的同时控制尾部风险。"
+        )
 
-        response = llm.invoke(prompt)
+        try:
+            response = invoke_llm_with_retry(
+                llm,
+                prompt,
+                logger=logger,
+                role_name="Risky Analyst",
+                max_retries=2,
+            )
+            response_content = response.content
+        except Exception as exc:
+            logger.error(f"❌ [Risky Analyst] 多次调用失败，使用降级发言: {exc}")
+            response_content = fallback_content
 
         llm_elapsed = time.time() - llm_start_time
         logger.info(f"⏱️ [Risky Analyst] LLM调用完成，耗时: {llm_elapsed:.2f}秒")
 
-        argument = f"Risky Analyst: {response.content}"
+        argument = f"Risky Analyst: {response_content}"
 
         new_count = risk_debate_state["count"] + 1
         logger.info(f"🔥 [激进风险分析师] 发言完成，计数: {risk_debate_state['count']} -> {new_count}")

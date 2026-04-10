@@ -636,7 +636,13 @@ class SimpleAnalysisService:
         except ImportError:
             logger.warning("⚠️ WebSocket 管理器不可用")
 
-    async def _update_progress_async(self, task_id: str, progress: int, message: str):
+    async def _update_progress_async(
+        self,
+        task_id: str,
+        progress: int,
+        message: str,
+        current_step_description: str = "",
+    ):
         """异步更新进度（内存和MongoDB）"""
         try:
             # 更新内存
@@ -645,7 +651,9 @@ class SimpleAnalysisService:
                 status=TaskStatus.RUNNING,
                 progress=progress,
                 message=message,
-                current_step=message
+                current_step=message,
+                current_step_name=message,
+                current_step_description=current_step_description,
             )
 
             # 更新 MongoDB
@@ -658,6 +666,8 @@ class SimpleAnalysisService:
                     "$set": {
                         "progress": progress,
                         "current_step": message,
+                        "current_step_name": message,
+                        "current_step_description": current_step_description,
                         "message": message,
                         "updated_at": datetime.utcnow()
                     }
@@ -955,7 +965,15 @@ class SimpleAnalysisService:
             )
 
             # 同步更新MongoDB状态
-            await self._update_task_status(task_id, AnalysisStatus.PROCESSING, 10)
+            await self._update_task_status(
+                task_id,
+                AnalysisStatus.PROCESSING,
+                10,
+                current_step="initialization",
+                current_step_name="正在初始化分析...",
+                current_step_description="分析任务已提交，正在启动分析流程",
+                message="分析开始...",
+            )
 
             # 数据准备阶段（在线程中执行）
             await asyncio.to_thread(
@@ -974,7 +992,15 @@ class SimpleAnalysisService:
             )
 
             # 同步更新MongoDB状态
-            await self._update_task_status(task_id, AnalysisStatus.PROCESSING, 20)
+            await self._update_task_status(
+                task_id,
+                AnalysisStatus.PROCESSING,
+                20,
+                current_step="data_preparation",
+                current_step_name="🔧 环境检查",
+                current_step_description="准备分析数据与运行环境",
+                message="准备分析数据...",
+            )
 
             # 执行实际的分析
             result = await self._execute_analysis_sync(task_id, user_id, request, progress_tracker)
@@ -1004,11 +1030,21 @@ class SimpleAnalysisService:
                 progress=100,
                 message="分析完成",
                 current_step="completed",
+                current_step_name="分析完成",
+                current_step_description="分析流程已全部完成，正在展示最终结果",
                 result_data=result
             )
 
             # 同步更新MongoDB状态为完成
-            await self._update_task_status(task_id, AnalysisStatus.COMPLETED, 100)
+            await self._update_task_status(
+                task_id,
+                AnalysisStatus.COMPLETED,
+                100,
+                current_step="completed",
+                current_step_name="分析完成",
+                current_step_description="分析流程已全部完成，正在展示最终结果",
+                message="分析完成",
+            )
 
             # 创建通知：分析完成（方案B：REST+SSE）
             try:
@@ -1065,11 +1101,22 @@ class SimpleAnalysisService:
                 progress=0,
                 message="分析失败",
                 current_step="failed",
+                current_step_name="分析失败",
+                current_step_description=user_friendly_error,
                 error_message=user_friendly_error
             )
 
             # 同步更新MongoDB状态为失败
-            await self._update_task_status(task_id, AnalysisStatus.FAILED, 0, user_friendly_error)
+            await self._update_task_status(
+                task_id,
+                AnalysisStatus.FAILED,
+                0,
+                user_friendly_error,
+                current_step="failed",
+                current_step_name="分析失败",
+                current_step_description=user_friendly_error,
+                message="分析失败",
+            )
         finally:
             # 清理进度跟踪器缓存
             if task_id in self._progress_trackers:
@@ -1417,6 +1464,22 @@ class SimpleAnalysisService:
                 "📊 生成报告": 97,           # 93% + 4%
             }
 
+            node_description_map = {
+                "📊 市场分析师": "分析股价走势、成交量、技术指标等市场表现",
+                "💼 基本面分析师": "分析公司财务状况、盈利能力、成长性等基本面",
+                "📰 新闻分析师": "分析相关新闻、公告、行业动态对股价的影响",
+                "💬 社交媒体分析师": "分析社交媒体讨论、网络热度、散户情绪等",
+                "🐂 看涨研究员": "基于分析师报告构建买入论据",
+                "🐻 看跌研究员": "识别潜在风险和问题",
+                "👔 研究经理": "综合辩论结果，形成研究共识",
+                "💼 交易员决策": "基于研究结果制定具体交易策略",
+                "🔥 激进风险评估": "从激进角度评估投资风险",
+                "🛡️ 保守风险评估": "从保守角度评估投资风险",
+                "⚖️ 中性风险评估": "从中性角度评估投资风险",
+                "🎯 风险经理": "综合风险评估，制定风险控制策略",
+                "📊 生成报告": "整理分析结果，生成完整报告",
+            }
+
             def graph_progress_callback(message: str):
                 """接收 LangGraph 的进度更新
 
@@ -1441,7 +1504,9 @@ class SimpleAnalysisService:
                             # 更新 Redis 进度跟踪器
                             progress_tracker.update_progress({
                                 'progress_percentage': int(progress_pct),
-                                'last_message': message
+                                'last_message': message,
+                                'current_step_name': message,
+                                'current_step_description': node_description_map.get(message, "")
                             })
                             logger.info(f"📊 [Graph进度] 进度已更新: {current_progress}% → {int(progress_pct)}% - {message}")
 
@@ -1455,7 +1520,12 @@ class SimpleAnalysisService:
                                     loop = asyncio.get_running_loop()
                                     # 如果在事件循环中，使用 create_task
                                     asyncio.create_task(
-                                        self._update_progress_async(task_id, int(progress_pct), message)
+                                        self._update_progress_async(
+                                            task_id,
+                                            int(progress_pct),
+                                            message,
+                                            node_description_map.get(message, ""),
+                                        )
                                     )
                                     logger.debug(f"✅ [Graph进度] 已提交异步更新任务: {int(progress_pct)}%")
                                 except RuntimeError:
@@ -1491,7 +1561,9 @@ class SimpleAnalysisService:
                                                 status=TaskStatus.RUNNING,
                                                 progress=int(progress_pct),
                                                 message=message,
-                                                current_step=message
+                                                current_step=message,
+                                                current_step_name=message,
+                                                current_step_description=node_description_map.get(message, ""),
                                             )
                                         )
                                     finally:
@@ -1503,14 +1575,17 @@ class SimpleAnalysisService:
                         else:
                             # 进度没有增加，只更新消息
                             progress_tracker.update_progress({
-                                'last_message': message
+                                'last_message': message,
+                                'current_step_name': message,
+                                'current_step_description': node_description_map.get(message, "")
                             })
                             logger.info(f"📊 [Graph进度] 进度未变化({current_progress}% >= {int(progress_pct)}%)，仅更新消息: {message}")
                     else:
                         # 未知节点，只更新消息
                         logger.warning(f"⚠️ [Graph进度] 未知节点: {message}，仅更新消息")
                         progress_tracker.update_progress({
-                            'last_message': message
+                            'last_message': message,
+                            'current_step_name': message
                         })
 
                 except Exception as e:
@@ -1920,17 +1995,29 @@ class SimpleAnalysisService:
                     progress_tracker = self._progress_trackers[task_id]
                     progress_data = progress_tracker.to_dict()
 
+                    current_step_index = progress_data.get('current_step', 0)
+                    steps = progress_data.get('steps', [])
+                    current_step_name = progress_data.get('current_step_name', '')
+                    current_step_description = progress_data.get('current_step_description', '')
+
+                    if not current_step_name and steps and 0 <= current_step_index < len(steps):
+                        current_step_info = steps[current_step_index]
+                        current_step_name = current_step_info.get('name', '')
+                        current_step_description = current_step_info.get('description', '')
+
                     # 合并进度跟踪器的详细信息
                     result.update({
-                        'progress': progress_data['progress'],
-                        'current_step': progress_data['current_step'],
-                        'message': progress_data['message'],
-                        'elapsed_time': progress_data['elapsed_time'],
-                        'remaining_time': progress_data['remaining_time'],
+                        'progress': progress_data.get('progress', progress_data.get('progress_percentage', 0)),
+                        'current_step': current_step_index,
+                        'current_step_name': current_step_name,
+                        'current_step_description': current_step_description,
+                        'message': progress_data.get('message', progress_data.get('last_message', result.get('message', ''))),
+                        'elapsed_time': progress_data.get('elapsed_time', 0),
+                        'remaining_time': progress_data.get('remaining_time', 0),
                         'estimated_total_time': progress_data.get('estimated_total_time', 0),
-                        'steps': progress_data['steps'],
-                        'start_time': progress_data['start_time'],
-                        'last_update': progress_data['last_update']
+                        'steps': steps,
+                        'start_time': progress_data.get('start_time'),
+                        'last_update': progress_data.get('last_update', progress_data.get('start_time'))
                     })
         else:
             logger.warning(f"❌ 未找到任务: {task_id}")
@@ -2345,7 +2432,11 @@ class SimpleAnalysisService:
         task_id: str,
         status: AnalysisStatus,
         progress: int,
-        error_message: str = None
+        error_message: str = None,
+        current_step: str = None,
+        current_step_name: str = None,
+        current_step_description: str = None,
+        message: str = None,
     ):
         """更新任务状态"""
         try:
@@ -2355,6 +2446,15 @@ class SimpleAnalysisService:
                 "progress": progress,
                 "updated_at": datetime.utcnow()
             }
+
+            if current_step is not None:
+                update_data["current_step"] = current_step
+            if current_step_name is not None:
+                update_data["current_step_name"] = current_step_name
+            if current_step_description is not None:
+                update_data["current_step_description"] = current_step_description
+            if message is not None:
+                update_data["message"] = message
 
             if status == AnalysisStatus.PROCESSING and progress == 10:
                 update_data["started_at"] = datetime.utcnow()
