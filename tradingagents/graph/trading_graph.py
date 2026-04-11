@@ -1135,7 +1135,7 @@ class TradingAgentsGraph:
             model_info = "Unknown"
 
         # 处理决策并添加模型信息
-        decision = self.process_signal(final_state["final_trade_decision"], company_name)
+        decision = self.process_signal(final_state.get("final_trade_decision", ""), company_name)
         decision['model_info'] = model_info
 
         # Return decision and processed signal

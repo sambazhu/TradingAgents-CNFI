@@ -43,6 +43,19 @@ class TestShouldContinueMarket:
         state = make_mock_state(messages=[msg], market_report="短报告")
         assert logic.should_continue_market(state) == "tools_market"
 
+    def test_report_priority_over_tool_calls(self, logic):
+        """报告已存在时，即使有 tool_calls 和未达上限，也结束。"""
+        msg = MockAIMessage(content="", tool_calls=[{"name": "get_stock_data"}])
+        report = "这是一份详细的市场分析报告，包含了技术指标分析、价格趋势判断、投资建议等内容" * 3
+        state = make_mock_state(messages=[msg], market_report=report, market_tool_call_count=0)
+        assert logic.should_continue_market(state) == "Msg Clear Market"
+
+    def test_max_tool_calls_no_report_still_ends(self, logic):
+        """达到上限但无报告 → 结束（不再循环）。"""
+        msg = MockAIMessage(content="", tool_calls=[{"name": "get_stock_data"}])
+        state = make_mock_state(messages=[msg], market_tool_call_count=3, market_report="")
+        assert logic.should_continue_market(state) == "Msg Clear Market"
+
 
 # ── should_continue_social ──────────────────────────────────────────
 

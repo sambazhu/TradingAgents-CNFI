@@ -16,47 +16,44 @@ class ConditionalLogic:
         self.max_risk_discuss_rounds = max_risk_discuss_rounds
 
     def should_continue_market(self, state: AgentState):
-        """Determine if market analysis should continue."""
+        """Determine if market analysis should continue.
+
+        优先级（与 fundamentals 一致）：
+        1. 已有报告 (>100字符) → 结束
+        2. 有 tool_calls 且未达上限 → 执行工具
+        3. 无 tool_calls → 结束
+        """
         from tradingagents.utils.logging_init import get_logger
         logger = get_logger("agents")
 
         messages = state["messages"]
         last_message = messages[-1]
 
-        # 死循环修复: 添加工具调用次数检查
         tool_call_count = state.get("market_tool_call_count", 0)
         max_tool_calls = 3
-
-        # 检查是否已经有市场分析报告
         market_report = state.get("market_report", "")
 
         logger.info(f"🔀 [条件判断] should_continue_market")
-        logger.info(f"🔀 [条件判断] - 消息数量: {len(messages)}")
-        logger.info(f"🔀 [条件判断] - 报告长度: {len(market_report)}")
-        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+        logger.info(f"🔀 [条件判断] - 消息数量: {len(messages)}, 报告长度: {len(market_report)}")
+        logger.info(f"🔀 [条件判断] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
         logger.info(f"🔀 [条件判断] - 最后消息类型: {type(last_message).__name__}")
-        logger.info(f"🔀 [条件判断] - 是否有tool_calls: {hasattr(last_message, 'tool_calls')}")
         if hasattr(last_message, 'tool_calls'):
             logger.info(f"🔀 [条件判断] - tool_calls数量: {len(last_message.tool_calls) if last_message.tool_calls else 0}")
-            if last_message.tool_calls:
-                for i, tc in enumerate(last_message.tool_calls):
-                    logger.info(f"🔀 [条件判断] - tool_call[{i}]: {tc.get('name', 'unknown')}")
 
-        # 死循环修复: 如果达到最大工具调用次数，强制结束
-        if tool_call_count >= max_tool_calls:
-            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear Market")
-            return "Msg Clear Market"
-
-        # 如果已经有报告内容，说明分析已完成，不再循环
+        # 优先级1: 已有报告 → 结束
         if market_report and len(market_report) > 100:
             logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Market")
             return "Msg Clear Market"
 
-        # 只有AIMessage才有tool_calls属性
+        # 优先级2: 有 tool_calls 且未达上限 → 执行工具
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            if tool_call_count >= max_tool_calls:
+                logger.warning(f"🔧 [条件判断] 工具调用次数已达上限({tool_call_count}/{max_tool_calls})，强制结束")
+                return "Msg Clear Market"
             logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_market")
             return "tools_market"
 
+        # 优先级3: 无 tool_calls → 结束
         logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Market")
         return "Msg Clear Market"
 
