@@ -316,7 +316,13 @@ class OptimizedChinaDataProvider:
             logger.warning(f"⚠️ [基本面优化] 获取{symbol}基础信息失败: {e}")
             return f"股票代码: {symbol}\n股票名称: 未知公司\n当前价格: N/A\n涨跌幅: N/A\n成交量: N/A"
 
-    def _generate_fundamentals_report(self, symbol: str, stock_data: str, analysis_modules: str = "standard") -> str:
+    def _generate_fundamentals_report(
+        self,
+        symbol: str,
+        stock_data: str,
+        analysis_modules: str = "standard",
+        analysis_date: str = "",
+    ) -> str:
         """基于股票数据生成真实的基本面分析报告
         
         Args:
@@ -330,6 +336,17 @@ class OptimizedChinaDataProvider:
         logger.debug(f"🔍 [股票代码追踪] 股票代码长度: {len(str(symbol))}")
         logger.debug(f"🔍 [股票代码追踪] 股票代码字符: {list(str(symbol))}")
         logger.debug(f"🔍 [股票代码追踪] 接收到的股票数据前200字符: {stock_data[:200] if stock_data else 'None'}")
+
+        if analysis_date:
+            try:
+                analysis_dt = datetime.strptime(analysis_date, "%Y-%m-%d")
+            except ValueError:
+                analysis_dt = datetime.now(ZoneInfo(get_timezone_name()))
+        else:
+            analysis_dt = datetime.now(ZoneInfo(get_timezone_name()))
+
+        analysis_date_display = analysis_dt.strftime('%Y年%m月%d日')
+        generated_at = datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')
 
         # 从股票数据中提取信息
         company_name = "未知公司"
@@ -427,9 +444,9 @@ class OptimizedChinaDataProvider:
         logger.debug(f"🔍 [股票代码追踪] _get_industry_info 返回结果: {industry_info}")
 
         # 尝试获取财务指标，如果失败则返回简化的基本面报告
-        logger.debug(f"🔍 [股票代码追踪] 调用 _estimate_financial_metrics，传入参数: '{symbol}'")
+        logger.debug(f"🔍 [股票代码追踪] 调用 _estimate_financial_metrics，传入参数: '{symbol}', analysis_date='{analysis_date}'")
         try:
-            financial_estimates = self._estimate_financial_metrics(symbol, current_price)
+            financial_estimates = self._estimate_financial_metrics(symbol, current_price, analysis_date)
             logger.debug(f"🔍 [股票代码追踪] _estimate_financial_metrics 返回结果: {financial_estimates}")
         except Exception as e:
             logger.warning(f"⚠️ [基本面分析] 无法获取财务指标: {e}")
@@ -457,7 +474,7 @@ class OptimizedChinaDataProvider:
 3. 结合技术分析进行综合判断
 
 ---
-**生成时间**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}
+**生成时间**: {generated_at}
 **数据来源**: 基础市场数据
 """
             return simplified_report.strip()
@@ -495,7 +512,7 @@ class OptimizedChinaDataProvider:
 - **股票名称**: {company_name}
 - **当前股价**: {current_price}
 - **涨跌幅**: {change_pct}
-- **分析日期**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y年%m月%d日')}{data_source_note}
+- **分析日期**: {analysis_date_display}{data_source_note}
 
 ## 💰 核心财务指标
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
@@ -513,7 +530,7 @@ class OptimizedChinaDataProvider:
 **重要声明**: 本报告基于公开数据和模型估算生成，仅供参考，不构成投资建议。
 **数据来源**: {data_source if data_source else "多源数据"}数据接口
 **降级说明**: {degraded_reason if degraded_reason else "无"}
-**生成时间**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}
+**生成时间**: {generated_at}
 """
         elif analysis_modules in ["standard", "full"]:
             # 标准/完整模式：包含详细分析
@@ -527,7 +544,7 @@ class OptimizedChinaDataProvider:
 - **当前股价**: {current_price}
 - **涨跌幅**: {change_pct}
 - **成交量**: {volume}
-- **分析日期**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y年%m月%d日')}{data_source_note}
+- **分析日期**: {analysis_date_display}{data_source_note}
 
 ## 💰 财务数据分析
 
@@ -573,7 +590,7 @@ class OptimizedChinaDataProvider:
 **重要声明**: 本报告基于公开数据和模型估算生成，仅供参考，不构成投资建议。
 **数据来源**: {data_source if data_source else "多源数据"}数据接口
 **降级说明**: {degraded_reason if degraded_reason else "无"}
-**生成时间**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}
+**生成时间**: {generated_at}
 """
         else:  # detailed, comprehensive
             # 详细/全面模式：包含最完整的分析
@@ -587,7 +604,7 @@ class OptimizedChinaDataProvider:
 - **当前股价**: {current_price}
 - **涨跌幅**: {change_pct}
 - **成交量**: {volume}
-- **分析日期**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y年%m月%d日')}{data_source_note}
+- **分析日期**: {analysis_date_display}{data_source_note}
 
 ## 💰 财务数据分析
 
@@ -684,7 +701,7 @@ class OptimizedChinaDataProvider:
 
 **数据来源**: {data_source if data_source else "多源数据"}数据接口 + 基本面分析模型
 **降级说明**: {degraded_reason if degraded_reason else "无"}
-**生成时间**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}
+**生成时间**: {generated_at}
 """
 
         return report
@@ -859,14 +876,19 @@ class OptimizedChinaDataProvider:
             "degraded_reason": reason,
         }
 
-    def _parse_gildata_financial_metrics(self, symbol: str, price_value: float) -> dict:
+    def _parse_gildata_financial_metrics(
+        self,
+        symbol: str,
+        price_value: float,
+        analysis_date: str = "",
+    ) -> dict:
         """使用 Gildata 直接生成基本面核心指标，作为主链 fallback。"""
         client = get_gildata_client()
         if not client:
             logger.info(f"ℹ️ [Gildata-基本面] 未获取到客户端，跳过 {symbol}")
             return None
 
-        trade_date = datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d')
+        trade_date = analysis_date or datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d')
         metrics = {}
         source_hits = []
 
@@ -988,7 +1010,7 @@ class OptimizedChinaDataProvider:
         logger.info(f"✅ [Gildata-基本面] 作为主链 fallback 命中: {symbol}, 来源={source_hits}")
         return metrics
 
-    def _estimate_financial_metrics(self, symbol: str, current_price: str) -> dict:
+    def _estimate_financial_metrics(self, symbol: str, current_price: str, analysis_date: str = "") -> dict:
         """获取真实财务指标；全失败时返回结构化降级数据而不是抛异常。"""
 
         # 提取价格数值
@@ -998,7 +1020,7 @@ class OptimizedChinaDataProvider:
             price_value = 10.0  # 默认值
 
         # 尝试获取真实财务数据
-        real_metrics = self._get_real_financial_metrics(symbol, price_value)
+        real_metrics = self._get_real_financial_metrics(symbol, price_value, analysis_date)
         if real_metrics:
             logger.info(f"✅ 使用真实财务数据: {symbol}")
             return real_metrics
@@ -1007,15 +1029,18 @@ class OptimizedChinaDataProvider:
         logger.error(f"❌ {error_msg}")
         return self._build_degraded_financial_metrics(symbol, error_msg)
 
-    def _get_real_financial_metrics(self, symbol: str, price_value: float) -> dict:
+    def _get_real_financial_metrics(self, symbol: str, price_value: float, analysis_date: str = "") -> dict:
         """获取真实财务指标 - 优先使用数据库缓存，再使用API"""
         try:
+            today_str = datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d')
+            use_realtime_quote = not analysis_date or analysis_date >= today_str
+
             # 🔥 优先从 market_quotes 获取实时股价，替换传入的 price_value
             from tradingagents.config.database_manager import get_database_manager
             db_manager = get_database_manager()
             db_client = None
 
-            if db_manager.is_mongodb_available():
+            if use_realtime_quote and db_manager.is_mongodb_available():
                 try:
                     db_client = db_manager.get_mongodb_client()
                     db = db_client['tradingagents']
@@ -1033,6 +1058,8 @@ class OptimizedChinaDataProvider:
                         logger.info(f"⚠️ market_quotes 中未找到{code6}的实时股价，使用传入价格: {price_value}元")
                 except Exception as e:
                     logger.warning(f"⚠️ 从 market_quotes 获取实时股价失败: {e}，使用传入价格: {price_value}元")
+            elif not use_realtime_quote:
+                logger.info(f"📅 历史分析模式({analysis_date})，跳过 market_quotes 实时价格覆盖，沿用分析基准日价格: {price_value}元")
             else:
                 logger.info(f"⚠️ MongoDB 不可用，使用传入价格: {price_value}元")
 
@@ -1062,7 +1089,7 @@ class OptimizedChinaDataProvider:
 
             # 第二优先级：从 Gildata 获取财务/估值核心指标
             logger.info(f"🔄 MongoDB 未命中或解析失败，尝试 Gildata 获取{symbol}财务指标")
-            gildata_metrics = self._parse_gildata_financial_metrics(symbol, price_value)
+            gildata_metrics = self._parse_gildata_financial_metrics(symbol, price_value, analysis_date)
             if gildata_metrics:
                 return gildata_metrics
 

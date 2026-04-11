@@ -6,6 +6,7 @@
 import asyncio
 import uuid
 import logging
+import re
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from pathlib import Path
@@ -448,16 +449,17 @@ def create_analysis_config(
     config["deep_think_llm"] = deep_model
     config["quick_think_llm"] = quick_model
 
-    # 统一分析师选择逻辑，确保前端 include_* 开关真正影响主执行链
+    # 统一分析师选择逻辑
     normalized_analysts = list(dict.fromkeys(selected_analysts or []))
-    if not include_sentiment and "social" in normalized_analysts:
-        normalized_analysts = [
-            analyst for analyst in normalized_analysts if analyst != "social"
-        ]
-        logger.info("🔧 [配置创建] include_sentiment=false，已从主链移除 social 分析师")
+    social_selected = "social" in normalized_analysts
+    effective_include_sentiment = bool(include_sentiment) or social_selected
+
+    # 兼容旧请求：即使 include_sentiment=false，只要勾选了 social 也必须执行社媒分析师主链路
+    if social_selected and not include_sentiment:
+        logger.info("🔧 [配置创建] 检测到 social 已勾选，自动开启情绪链路兼容开关")
 
     config["selected_analysts"] = normalized_analysts
-    config["include_sentiment"] = include_sentiment
+    config["include_sentiment"] = effective_include_sentiment
     config["include_risk"] = include_risk
 
     # 根据研究深度调整配置 - 支持5个级别（与Web界面保持一致）
@@ -592,7 +594,10 @@ def create_analysis_config(
     logger.info(f"📋 ========== 创建分析配置完成 ==========")
     logger.info(f"   🎯 研究深度: {research_depth}")
     logger.info(f"   👥 分析师链路: {config['selected_analysts']}")
-    logger.info(f"   💬 情绪链路: {'开启' if include_sentiment else '关闭'}")
+    logger.info(
+        f"   💬 情绪链路: {'开启' if config['include_sentiment'] else '关闭'} "
+        f"(请求值={include_sentiment}, social已选={'是' if social_selected else '否'})"
+    )
     logger.info(f"   ⚖️ 风险链路: {'开启' if include_risk else '关闭'}")
     logger.info(f"   🔥 辩论轮次: {config['max_debate_rounds']}")
     logger.info(f"   ⚖️ 风险讨论轮次: {config['max_risk_discuss_rounds']}")
@@ -676,6 +681,171 @@ class SimpleAnalysisService:
             logger.debug(f"✅ [异步更新] 已更新内存和MongoDB: {progress}%")
         except Exception as e:
             logger.warning(f"⚠️ [异步更新] 失败: {e}")
+
+    def _get_research_debate_rounds(self, research_depth: str) -> int:
+        """根据分析深度计算研究辩论轮次"""
+        if research_depth in {"快速", "基础", "标准"}:
+            return 1
+        if research_depth == "深度":
+            return 2
+        if research_depth == "全面":
+            return 3
+        return 1
+
+    def _build_tracker_step_lookup(
+        self,
+        progress_tracker: Optional[RedisProgressTracker],
+    ) -> Dict[str, Dict[str, Any]]:
+        """基于当前任务实际步骤生成进度查找表"""
+        if not progress_tracker:
+            return {}
+
+        lookup: Dict[str, Dict[str, Any]] = {}
+        cumulative_weight = 0.0
+        last_progress = 0
+
+        for step in progress_tracker.analysis_steps:
+            cumulative_weight += step.weight
+            display_progress = min(99, max(1, int(round(cumulative_weight * 100)) - 1))
+            if display_progress <= last_progress:
+                display_progress = min(99, last_progress + 1)
+
+            lookup[step.name] = {
+                "progress": display_progress,
+                "description": step.description,
+            }
+            last_progress = display_progress
+
+        return lookup
+
+    def _format_analysis_date_text(self, analysis_date: str, style: str = "cn") -> str:
+        """格式化分析日期文本"""
+        try:
+            dt = datetime.strptime(analysis_date, "%Y-%m-%d")
+        except Exception:
+            return analysis_date
+
+        if style == "cn_compact":
+            return f"{dt.year}年{dt.month}月{dt.day}日"
+        return dt.strftime("%Y年%m月%d日")
+
+    def _normalize_report_dates(self, report_text: str, analysis_date: str, report_type: str) -> str:
+        """统一修正报告中的分析日期，避免历史回放被当前日期污染"""
+        if not report_text or not analysis_date:
+            return report_text
+
+        normalized = report_text
+        cn_date = self._format_analysis_date_text(analysis_date, "cn")
+        cn_compact_date = self._format_analysis_date_text(analysis_date, "cn_compact")
+
+        if report_type == "fundamentals_report":
+            normalized = re.sub(
+                r"(?m)(\*\*分析日期[：:]\*\*\s*)(\d{4}年\d{1,2}月\d{1,2}日)",
+                rf"\g<1>{cn_date}",
+                normalized,
+            )
+            normalized = re.sub(
+                r"(?m)(\*\*分析日期[：:]\s*)(\d{4}年\d{1,2}月\d{1,2}日)(\*\*)",
+                rf"\g<1>{cn_date}\g<3>",
+                normalized,
+            )
+            normalized = re.sub(
+                r"本报告基于截至\d{4}年\d{1,2}月\d{1,2}日",
+                f"本报告基于截至{cn_compact_date}",
+                normalized,
+            )
+            return normalized
+
+        if report_type == "news_report":
+            normalized = re.sub(
+                r"(?m)(\*\*日期[：:]\*\*\s*)(\d{4}年\d{1,2}月\d{1,2}日)",
+                rf"\g<1>{cn_compact_date}",
+                normalized,
+            )
+            normalized = re.sub(
+                r"(?m)(📅\s*\*\*更新时间\*\*[：:]\s*)(\d{4}年\d{1,2}月\d{1,2}日)",
+                rf"\g<1>{cn_compact_date}",
+                normalized,
+            )
+            normalized = re.sub(
+                r"(?m)(📅\s*\*\*分析基准日\*\*[：:]\s*)(\d{4}-\d{2}-\d{2})",
+                rf"\g<1>{analysis_date}",
+                normalized,
+            )
+            normalized = re.sub(
+                r"(?m)(📌\s*新闻截面[：:]\s*截至\s*)(\d{4}-\d{2}-\d{2})(\s+23:59:59)",
+                rf"\g<1>{analysis_date}\g<3>",
+                normalized,
+            )
+            return normalized
+
+        return normalized
+
+    def _normalize_reports_payload(self, reports: Dict[str, Any], analysis_date: str) -> Dict[str, Any]:
+        """对返回给前端和落盘的报告做统一规范化"""
+        if not isinstance(reports, dict) or not analysis_date:
+            return reports
+
+        normalized_reports: Dict[str, Any] = dict(reports)
+        for report_type in ("fundamentals_report", "news_report"):
+            content = normalized_reports.get(report_type)
+            if isinstance(content, str) and content.strip():
+                normalized_reports[report_type] = self._normalize_report_dates(
+                    content,
+                    analysis_date,
+                    report_type,
+                )
+        return normalized_reports
+
+    def _resolve_graph_progress_steps(
+        self,
+        message: str,
+        debate_rounds: int,
+        debate_state: Dict[str, int],
+    ) -> List[str]:
+        """把 LangGraph 节点消息映射为产品进度步骤"""
+        direct_steps = {
+            "📊 市场分析师",
+            "💼 基本面分析师",
+            "📰 新闻分析师",
+            "💬 社交媒体分析师",
+            "👔 研究经理",
+            "💼 交易员决策",
+            "🔥 激进风险评估",
+            "🛡️ 保守风险评估",
+            "⚖️ 中性风险评估",
+            "🎯 风险经理",
+        }
+
+        if message in direct_steps:
+            return [message]
+
+        if message == "📊 生成报告":
+            return ["📡 信号处理"]
+
+        if message == "🐂 看涨研究员":
+            debate_state["bull_count"] = debate_state.get("bull_count", 0) + 1
+            bull_count = debate_state["bull_count"]
+            if bull_count == 1:
+                return [message]
+            round_no = min(debate_rounds, max(1, bull_count - 1))
+            return [f"🎯 研究辩论 第{round_no}轮"]
+
+        if message == "🐻 看跌研究员":
+            debate_state["bear_count"] = debate_state.get("bear_count", 0) + 1
+            bear_count = debate_state["bear_count"]
+
+            steps = []
+            if bear_count == 1:
+                steps.append(message)
+
+            if debate_rounds > 0:
+                round_no = min(debate_rounds, bear_count)
+                steps.append(f"🎯 研究辩论 第{round_no}轮")
+
+            return steps or [message]
+
+        return [message]
 
     def _resolve_stock_name(self, code: Optional[str]) -> str:
         """解析股票名称（带缓存）"""
@@ -929,11 +1099,18 @@ class SimpleAnalysisService:
             def create_progress_tracker():
                 """在线程中创建进度跟踪器"""
                 logger.info(f"📊 [线程] 创建进度跟踪器: {task_id}")
+                selected_analysts = (
+                    request.parameters.selected_analysts
+                    if request.parameters and request.parameters.selected_analysts
+                    else ["market", "fundamentals"]
+                )
+                research_depth = request.parameters.research_depth if request.parameters else "标准"
                 tracker = RedisProgressTracker(
                     task_id=task_id,
-                    analysts=request.parameters.selected_analysts or ["market", "fundamentals"],
-                    research_depth=request.parameters.research_depth or "标准",
-                    llm_provider="dashscope"
+                    analysts=selected_analysts,
+                    research_depth=research_depth,
+                    llm_provider="dashscope",
+                    include_risk=request.parameters.include_risk if request.parameters else True,
                 )
                 logger.info(f"✅ [线程] 进度跟踪器创建完成: {task_id}")
                 return tracker
@@ -950,8 +1127,10 @@ class SimpleAnalysisService:
             await asyncio.to_thread(
                 progress_tracker.update_progress,
                 {
-                    "progress_percentage": 10,
-                    "last_message": "🚀 开始股票分析"
+                    "progress_percentage": 3,
+                    "last_message": "📋 准备阶段",
+                    "current_step_name": "📋 准备阶段",
+                    "current_step_description": "验证股票代码，检查数据源可用性",
                 }
             )
 
@@ -959,19 +1138,21 @@ class SimpleAnalysisService:
             await self.memory_manager.update_task_status(
                 task_id=task_id,
                 status=TaskStatus.RUNNING,
-                progress=10,
+                progress=3,
                 message="分析开始...",
-                current_step="initialization"
+                current_step="initialization",
+                current_step_name="📋 准备阶段",
+                current_step_description="验证股票代码，检查数据源可用性",
             )
 
             # 同步更新MongoDB状态
             await self._update_task_status(
                 task_id,
                 AnalysisStatus.PROCESSING,
-                10,
+                3,
                 current_step="initialization",
-                current_step_name="正在初始化分析...",
-                current_step_description="分析任务已提交，正在启动分析流程",
+                current_step_name="📋 准备阶段",
+                current_step_description="验证股票代码，检查数据源可用性",
                 message="分析开始...",
             )
 
@@ -979,26 +1160,30 @@ class SimpleAnalysisService:
             await asyncio.to_thread(
                 progress_tracker.update_progress,
                 {
-                    "progress_percentage": 20,
-                    "last_message": "🔧 检查环境配置"
+                    "progress_percentage": 5,
+                    "last_message": "🔧 环境检查",
+                    "current_step_name": "🔧 环境检查",
+                    "current_step_description": "检查API密钥配置，确保数据获取正常",
                 }
             )
             await self.memory_manager.update_task_status(
                 task_id=task_id,
                 status=TaskStatus.RUNNING,
-                progress=20,
+                progress=5,
                 message="准备分析数据...",
-                current_step="data_preparation"
+                current_step="data_preparation",
+                current_step_name="🔧 环境检查",
+                current_step_description="检查API密钥配置，确保数据获取正常",
             )
 
             # 同步更新MongoDB状态
             await self._update_task_status(
                 task_id,
                 AnalysisStatus.PROCESSING,
-                20,
+                5,
                 current_step="data_preparation",
                 current_step_name="🔧 环境检查",
-                current_step_description="准备分析数据与运行环境",
+                current_step_description="检查API密钥配置，确保数据获取正常",
                 message="准备分析数据...",
             )
 
@@ -1165,19 +1350,39 @@ class SimpleAnalysisService:
             thread_logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
             logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
 
+            selected_analysts = (
+                request.parameters.selected_analysts
+                if request.parameters and request.parameters.selected_analysts
+                else ["market", "fundamentals"]
+            )
+            research_depth = request.parameters.research_depth if request.parameters else "标准"
+            include_risk = request.parameters.include_risk if request.parameters else True
+            debate_rounds = self._get_research_debate_rounds(research_depth)
+            tracker_step_lookup = self._build_tracker_step_lookup(progress_tracker)
+
             # 🔧 根据 RedisProgressTracker 的步骤权重计算准确的进度
             # 基础准备阶段 (10%): 0.03 + 0.02 + 0.01 + 0.02 + 0.02 = 0.10
             # 步骤索引 0-4 对应 0-10%
 
             # 异步更新进度（在线程池中调用）
-            def update_progress_sync(progress: int, message: str, step: str):
+            def update_progress_sync(
+                progress: int,
+                message: str,
+                step: str,
+                current_step_name: Optional[str] = None,
+                current_step_description: str = "",
+            ):
                 """在线程池中同步更新进度"""
                 try:
+                    display_name = current_step_name or message
+
                     # 同时更新 Redis 进度跟踪器
                     if progress_tracker:
                         progress_tracker.update_progress({
                             "progress_percentage": progress,
-                            "last_message": message
+                            "last_message": message,
+                            "current_step_name": display_name,
+                            "current_step_description": current_step_description,
                         })
 
                     # 🔥 使用同步方式更新内存和 MongoDB，避免事件循环冲突
@@ -1192,7 +1397,9 @@ class SimpleAnalysisService:
                                 status=TaskStatus.RUNNING,
                                 progress=progress,
                                 message=message,
-                                current_step=step
+                                current_step=step,
+                                current_step_name=display_name,
+                                current_step_description=current_step_description,
                             )
                         )
                     finally:
@@ -1212,6 +1419,8 @@ class SimpleAnalysisService:
                             "$set": {
                                 "progress": progress,
                                 "current_step": step,
+                                "current_step_name": display_name,
+                                "current_step_description": current_step_description,
                                 "message": message,
                                 "updated_at": datetime.utcnow()
                             }
@@ -1223,13 +1432,18 @@ class SimpleAnalysisService:
                     logger.warning(f"⚠️ 进度更新失败: {e}")
 
             # 配置阶段 - 对应步骤3 "⚙️ 参数设置" (6-8%)
-            update_progress_sync(7, "⚙️ 配置分析参数", "configuration")
+            config_step = tracker_step_lookup.get("⚙️ 参数设置", {})
+            update_progress_sync(
+                config_step.get("progress", 7),
+                "⚙️ 参数设置",
+                "configuration",
+                current_step_name="⚙️ 参数设置",
+                current_step_description=config_step.get("description", "配置分析参数和AI模型选择"),
+            )
 
             # 🆕 智能模型选择逻辑
             from app.services.model_capability_service import get_model_capability_service
             capability_service = get_model_capability_service()
-
-            research_depth = request.parameters.research_depth if request.parameters else "标准"
 
             # 1. 检查前端是否指定了模型
             if (request.parameters and
@@ -1300,13 +1514,13 @@ class SimpleAnalysisService:
             # 创建分析配置（支持混合模式）
             config = create_analysis_config(
                 research_depth=research_depth,
-                selected_analysts=request.parameters.selected_analysts if request.parameters else ["market", "fundamentals"],
+                selected_analysts=selected_analysts,
                 quick_model=quick_model,
                 deep_model=deep_model,
                 llm_provider=quick_provider,  # 主要使用快速模型的供应商
                 market_type=market_type,  # 使用前端传递的市场类型
                 include_sentiment=request.parameters.include_sentiment if request.parameters else True,
-                include_risk=request.parameters.include_risk if request.parameters else True,
+                include_risk=include_risk,
             )
 
             # 🔧 添加混合模式配置
@@ -1322,7 +1536,14 @@ class SimpleAnalysisService:
             logger.info(f"🔍 [模型验证] 配置中的LLM供应商: {config.get('llm_provider')}")
 
             # 初始化分析引擎 - 对应步骤4 "🚀 启动引擎" (8-10%)
-            update_progress_sync(9, "🚀 初始化AI分析引擎", "engine_initialization")
+            engine_step = tracker_step_lookup.get("🚀 启动引擎", {})
+            update_progress_sync(
+                engine_step.get("progress", 9),
+                "🚀 启动引擎",
+                "engine_initialization",
+                current_step_name="🚀 启动引擎",
+                current_step_description=engine_step.get("description", "初始化AI分析引擎，准备开始分析"),
+            )
             trading_graph = self._get_trading_graph(config)
 
             # 🔍 验证TradingGraph实例中的配置
@@ -1357,134 +1578,24 @@ class SimpleAnalysisService:
 
             # 开始分析 - 进度10%，即将进入分析师阶段
             # 注意：不要手动设置过高的进度，让 graph_progress_callback 来更新实际的分析进度
-            update_progress_sync(10, "🤖 开始多智能体协作分析", "agent_analysis")
+            start_step = tracker_step_lookup.get("🚀 启动引擎", {})
+            update_progress_sync(
+                max(10, start_step.get("progress", 9)),
+                "🤖 开始多智能体协作分析",
+                "agent_analysis",
+                current_step_name="🚀 启动引擎",
+                current_step_description=start_step.get("description", "初始化AI分析引擎，准备开始分析"),
+            )
 
-            # 启动一个异步任务来模拟进度更新
-            import threading
-            import time
-
-            def simulate_progress():
-                """模拟TradingAgents内部进度"""
-                try:
-                    if not progress_tracker:
-                        return
-
-                    # 分析师阶段 - 根据选择的分析师数量动态调整
-                    analysts = request.parameters.selected_analysts if request.parameters else ["market", "fundamentals"]
-
-                    # 模拟分析师执行
-                    for i, analyst in enumerate(analysts):
-                        time.sleep(15)  # 每个分析师大约15秒
-                        if analyst == "market":
-                            progress_tracker.update_progress("📊 市场分析师正在分析")
-                        elif analyst == "fundamentals":
-                            progress_tracker.update_progress("💼 基本面分析师正在分析")
-                        elif analyst == "news":
-                            progress_tracker.update_progress("📰 新闻分析师正在分析")
-                        elif analyst == "social":
-                            progress_tracker.update_progress("💬 社交媒体分析师正在分析")
-
-                    # 研究团队阶段
-                    time.sleep(10)
-                    progress_tracker.update_progress("🐂 看涨研究员构建论据")
-
-                    time.sleep(8)
-                    progress_tracker.update_progress("🐻 看跌研究员识别风险")
-
-                    # 辩论阶段 - 根据5个级别确定辩论轮次
-                    research_depth = request.parameters.research_depth if request.parameters else "标准"
-                    if research_depth == "快速":
-                        debate_rounds = 1
-                    elif research_depth == "基础":
-                        debate_rounds = 1
-                    elif research_depth == "标准":
-                        debate_rounds = 1
-                    elif research_depth == "深度":
-                        debate_rounds = 2
-                    elif research_depth == "全面":
-                        debate_rounds = 3
-                    else:
-                        debate_rounds = 1  # 默认
-
-                    for round_num in range(debate_rounds):
-                        time.sleep(12)
-                        progress_tracker.update_progress(f"🎯 研究辩论 第{round_num+1}轮")
-
-                    time.sleep(8)
-                    progress_tracker.update_progress("👔 研究经理形成共识")
-
-                    # 交易员阶段
-                    time.sleep(10)
-                    progress_tracker.update_progress("💼 交易员制定策略")
-
-                    # 风险管理阶段
-                    time.sleep(8)
-                    progress_tracker.update_progress("🔥 激进风险评估")
-
-                    time.sleep(6)
-                    progress_tracker.update_progress("🛡️ 保守风险评估")
-
-                    time.sleep(6)
-                    progress_tracker.update_progress("⚖️ 中性风险评估")
-
-                    time.sleep(8)
-                    progress_tracker.update_progress("🎯 风险经理制定策略")
-
-                    # 最终阶段
-                    time.sleep(5)
-                    progress_tracker.update_progress("📡 信号处理")
-
-                except Exception as e:
-                    logger.warning(f"⚠️ 进度模拟失败: {e}")
-
-            # 启动进度模拟线程
-            progress_thread = threading.Thread(target=simulate_progress, daemon=True)
-            progress_thread.start()
-
-            # 定义进度回调函数，用于接收 LangGraph 的实时进度
-            # 节点进度映射表（与 RedisProgressTracker 的步骤权重对应）
-            node_progress_map = {
-                # 分析师阶段 (10% → 45%)
-                "📊 市场分析师": 27.5,      # 10% + 17.5% (假设2个分析师)
-                "💼 基本面分析师": 45,       # 10% + 35%
-                "📰 新闻分析师": 27.5,       # 如果有3个分析师
-                "💬 社交媒体分析师": 27.5,   # 如果有4个分析师
-                # 研究辩论阶段 (45% → 70%)
-                "🐂 看涨研究员": 51.25,      # 45% + 6.25%
-                "🐻 看跌研究员": 57.5,       # 45% + 12.5%
-                "👔 研究经理": 70,           # 45% + 25%
-                # 交易员阶段 (70% → 78%)
-                "💼 交易员决策": 78,         # 70% + 8%
-                # 风险评估阶段 (78% → 93%)
-                "🔥 激进风险评估": 81.75,    # 78% + 3.75%
-                "🛡️ 保守风险评估": 85.5,    # 78% + 7.5%
-                "⚖️ 中性风险评估": 89.25,   # 78% + 11.25%
-                "🎯 风险经理": 93,           # 78% + 15%
-                # 最终阶段 (93% → 100%)
-                "📊 生成报告": 97,           # 93% + 4%
-            }
-
-            node_description_map = {
-                "📊 市场分析师": "分析股价走势、成交量、技术指标等市场表现",
-                "💼 基本面分析师": "分析公司财务状况、盈利能力、成长性等基本面",
-                "📰 新闻分析师": "分析相关新闻、公告、行业动态对股价的影响",
-                "💬 社交媒体分析师": "分析社交媒体讨论、网络热度、散户情绪等",
-                "🐂 看涨研究员": "基于分析师报告构建买入论据",
-                "🐻 看跌研究员": "识别潜在风险和问题",
-                "👔 研究经理": "综合辩论结果，形成研究共识",
-                "💼 交易员决策": "基于研究结果制定具体交易策略",
-                "🔥 激进风险评估": "从激进角度评估投资风险",
-                "🛡️ 保守风险评估": "从保守角度评估投资风险",
-                "⚖️ 中性风险评估": "从中性角度评估投资风险",
-                "🎯 风险经理": "综合风险评估，制定风险控制策略",
-                "📊 生成报告": "整理分析结果，生成完整报告",
+            debate_state = {
+                "bull_count": 0,
+                "bear_count": 0,
             }
 
             def graph_progress_callback(message: str):
                 """接收 LangGraph 的进度更新
 
-                根据节点名称直接映射到进度百分比，确保与 RedisProgressTracker 的步骤权重一致
-                注意：只在进度增加时更新，避免覆盖 RedisProgressTracker 的虚拟步骤进度
+                根据当前任务真实步骤动态映射，确保前后端对看到的是同一条链路
                 """
                 try:
                     logger.info(f"🎯🎯🎯 [Graph进度回调被调用] message={message}")
@@ -1492,101 +1603,31 @@ class SimpleAnalysisService:
                         logger.warning(f"⚠️ progress_tracker 为 None，无法更新进度")
                         return
 
-                    # 查找节点对应的进度百分比
-                    progress_pct = node_progress_map.get(message)
+                    resolved_steps = self._resolve_graph_progress_steps(
+                        message=message,
+                        debate_rounds=debate_rounds,
+                        debate_state=debate_state,
+                    )
 
-                    if progress_pct is not None:
-                        # 获取当前进度（使用 progress_data 属性）
-                        current_progress = progress_tracker.progress_data.get('progress_percentage', 0)
+                    for step_name in resolved_steps:
+                        step_meta = tracker_step_lookup.get(step_name, {})
+                        current_progress = int(progress_tracker.progress_data.get('progress_percentage', 0) or 0)
+                        step_progress = step_meta.get("progress", current_progress)
+                        progress_to_report = max(current_progress, int(step_progress))
+                        step_description = step_meta.get("description", "")
 
-                        # 只在进度增加时更新，避免覆盖虚拟步骤的进度
-                        if int(progress_pct) > current_progress:
-                            # 更新 Redis 进度跟踪器
-                            progress_tracker.update_progress({
-                                'progress_percentage': int(progress_pct),
-                                'last_message': message,
-                                'current_step_name': message,
-                                'current_step_description': node_description_map.get(message, "")
-                            })
-                            logger.info(f"📊 [Graph进度] 进度已更新: {current_progress}% → {int(progress_pct)}% - {message}")
+                        update_progress_sync(
+                            progress_to_report,
+                            message,
+                            step_name,
+                            current_step_name=step_name,
+                            current_step_description=step_description,
+                        )
 
-                            # 🔥 同时更新内存和 MongoDB
-                            try:
-                                import asyncio
-                                from datetime import datetime
-
-                                # 尝试获取当前运行的事件循环
-                                try:
-                                    loop = asyncio.get_running_loop()
-                                    # 如果在事件循环中，使用 create_task
-                                    asyncio.create_task(
-                                        self._update_progress_async(
-                                            task_id,
-                                            int(progress_pct),
-                                            message,
-                                            node_description_map.get(message, ""),
-                                        )
-                                    )
-                                    logger.debug(f"✅ [Graph进度] 已提交异步更新任务: {int(progress_pct)}%")
-                                except RuntimeError:
-                                    # 没有运行的事件循环，使用同步方式更新 MongoDB
-                                    from pymongo import MongoClient
-                                    from app.core.config import settings
-
-                                    # 创建同步 MongoDB 客户端
-                                    sync_client = MongoClient(settings.MONGO_URI)
-                                    sync_db = sync_client[settings.MONGO_DB]
-
-                                    # 同步更新 MongoDB
-                                    sync_db.analysis_tasks.update_one(
-                                        {"task_id": task_id},
-                                        {
-                                            "$set": {
-                                                "progress": int(progress_pct),
-                                                "current_step": message,
-                                                "message": message,
-                                                "updated_at": datetime.utcnow()
-                                            }
-                                        }
-                                    )
-                                    sync_client.close()
-
-                                    # 异步更新内存（创建新的事件循环）
-                                    loop = asyncio.new_event_loop()
-                                    asyncio.set_event_loop(loop)
-                                    try:
-                                        loop.run_until_complete(
-                                            self.memory_manager.update_task_status(
-                                                task_id=task_id,
-                                                status=TaskStatus.RUNNING,
-                                                progress=int(progress_pct),
-                                                message=message,
-                                                current_step=message,
-                                                current_step_name=message,
-                                                current_step_description=node_description_map.get(message, ""),
-                                            )
-                                        )
-                                    finally:
-                                        loop.close()
-
-                                    logger.debug(f"✅ [Graph进度] 已同步更新内存和MongoDB: {int(progress_pct)}%")
-                            except Exception as sync_err:
-                                logger.warning(f"⚠️ [Graph进度] 同步更新失败: {sync_err}")
-                        else:
-                            # 进度没有增加，只更新消息
-                            progress_tracker.update_progress({
-                                'last_message': message,
-                                'current_step_name': message,
-                                'current_step_description': node_description_map.get(message, "")
-                            })
-                            logger.info(f"📊 [Graph进度] 进度未变化({current_progress}% >= {int(progress_pct)}%)，仅更新消息: {message}")
-                    else:
-                        # 未知节点，只更新消息
-                        logger.warning(f"⚠️ [Graph进度] 未知节点: {message}，仅更新消息")
-                        progress_tracker.update_progress({
-                            'last_message': message,
-                            'current_step_name': message
-                        })
+                        logger.info(
+                            f"📊 [Graph进度] 节点已映射: {message} -> {step_name} "
+                            f"({current_progress}% → {progress_to_report}%)"
+                        )
 
                 except Exception as e:
                     logger.error(f"❌ Graph进度回调失败: {e}", exc_info=True)
@@ -1612,9 +1653,14 @@ class SimpleAnalysisService:
                 logger.info(f"🔍 [DEBUG] Decision属性: {list(vars(decision).keys())}")
 
             # 处理结果
-            if progress_tracker:
-                progress_tracker.update_progress("📊 处理分析结果")
-            update_progress_sync(90, "处理分析结果...", "result_processing")
+            report_step = tracker_step_lookup.get("📊 生成报告", {})
+            update_progress_sync(
+                report_step.get("progress", 97),
+                "📊 生成报告",
+                "report_generation",
+                current_step_name="📊 生成报告",
+                current_step_description=report_step.get("description", "整理分析结果，生成完整报告"),
+            )
 
             execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -1646,6 +1692,13 @@ class SimpleAnalysisService:
                         logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(value.strip())}")
                     else:
                         logger.debug(f"⚠️ [REPORTS] 跳过报告: {field} - 内容为空或太短")
+
+                reports = self._normalize_reports_payload(reports, analysis_date)
+
+                if isinstance(state, dict):
+                    for report_type in ("fundamentals_report", "news_report"):
+                        if isinstance(reports.get(report_type), str):
+                            state[report_type] = reports[report_type]
 
                 # 处理研究团队辩论状态报告
                 if hasattr(state, 'investment_debate_state') or (isinstance(state, dict) and 'investment_debate_state' in state):
@@ -2927,6 +2980,8 @@ class SimpleAnalysisService:
                 try:
                     state_key = module_info['state_key']
                     if state_key in state:
+                        file_path = reports_dir / module_info['filename']
+
                         # 提取模块内容
                         module_content = state[state_key]
                         if isinstance(module_content, str):
@@ -2934,8 +2989,23 @@ class SimpleAnalysisService:
                         else:
                             report_content = str(module_content)
 
+                        if not report_content or not report_content.strip():
+                            # 同一股票同一日期重复分析时，避免保留上次运行遗留的空文件
+                            if file_path.exists():
+                                file_path.unlink()
+                                logger.info(f"ℹ️ 跳过空报告并清理旧文件: {state_key} -> {file_path}")
+                            else:
+                                logger.info(f"ℹ️ 跳过空报告: {state_key}")
+                            continue
+
+                        if state_key in ("fundamentals_report", "news_report"):
+                            report_content = self._normalize_report_dates(
+                                report_content,
+                                analysis_date_str,
+                                state_key,
+                            )
+
                         # 保存到文件 - 使用web目录的文件名
-                        file_path = reports_dir / module_info['filename']
                         with open(file_path, 'w', encoding='utf-8') as f:
                             f.write(report_content)
 
