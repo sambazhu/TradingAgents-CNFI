@@ -46,11 +46,19 @@ def safe_serialize(data):
 class RedisProgressTracker:
     """Redis进度跟踪器"""
 
-    def __init__(self, task_id: str, analysts: List[str], research_depth: str, llm_provider: str):
+    def __init__(
+        self,
+        task_id: str,
+        analysts: List[str],
+        research_depth: str,
+        llm_provider: str,
+        include_risk: bool = True,
+    ):
         self.task_id = task_id
         self.analysts = analysts
         self.research_depth = research_depth
         self.llm_provider = llm_provider
+        self.include_risk = include_risk
 
         # Redis连接
         self.redis_client = None
@@ -159,17 +167,19 @@ class RedisProgressTracker:
         # 4) 交易团队阶段 (8%)
         steps.append(AnalysisStep("💼 交易员决策", "基于研究结果制定具体交易策略", "pending", 0.08))
         # 5) 风险管理团队阶段 (15%)
-        risk_weight = 0.15 / 4
+        if self.include_risk:
+            risk_weight = 0.15 / 4
+            steps.extend([
+                AnalysisStep("🔥 激进风险评估", "从激进角度评估投资风险", "pending", risk_weight),
+                AnalysisStep("🛡️ 保守风险评估", "从保守角度评估投资风险", "pending", risk_weight),
+                AnalysisStep("⚖️ 中性风险评估", "从中性角度评估投资风险", "pending", risk_weight),
+                AnalysisStep("🎯 风险经理", "综合风险评估，制定风险控制策略", "pending", risk_weight),
+            ])
+        # 6) 最终决策阶段
+        final_stage_weight = 0.07 if self.include_risk else 0.22
         steps.extend([
-            AnalysisStep("🔥 激进风险评估", "从激进角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("🛡️ 保守风险评估", "从保守角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("⚖️ 中性风险评估", "从中性角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("🎯 风险经理", "综合风险评估，制定风险控制策略", "pending", risk_weight),
-        ])
-        # 6) 最终决策阶段 (7%)
-        steps.extend([
-            AnalysisStep("📡 信号处理", "处理所有分析结果，生成交易信号", "pending", 0.04),
-            AnalysisStep("📊 生成报告", "整理分析结果，生成完整报告", "pending", 0.03),
+            AnalysisStep("📡 信号处理", "处理所有分析结果，生成交易信号", "pending", final_stage_weight * 4 / 7),
+            AnalysisStep("📊 生成报告", "整理分析结果，生成完整报告", "pending", final_stage_weight * 3 / 7),
         ])
         return steps
 
@@ -528,6 +538,7 @@ class RedisProgressTracker:
                 'analysts': self.analysts,
                 'research_depth': self.research_depth,
                 'llm_provider': self.llm_provider,
+                'include_risk': self.include_risk,
                 'steps': [asdict(step) for step in self.analysis_steps],
                 'start_time': self.progress_data.get('start_time'),
                 'elapsed_time': self.progress_data.get('elapsed_time', 0),

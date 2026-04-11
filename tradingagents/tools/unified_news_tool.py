@@ -6,7 +6,7 @@
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,16 @@ class UnifiedNewsAnalyzer:
         else:
             return "A股"
 
-    def _get_news_from_database(self, stock_code: str, max_news: int = 10) -> str:
+    def _is_historical_analysis(self, curr_date: str) -> bool:
+        """判断是否为历史回放分析"""
+        if not curr_date:
+            return False
+        try:
+            return datetime.strptime(curr_date, "%Y-%m-%d").date() < datetime.now().date()
+        except ValueError:
+            return False
+
+    def _get_news_from_database(self, stock_code: str, max_news: int = 10, curr_date: str = "") -> str:
         """
         从数据库获取新闻
 
@@ -137,7 +146,6 @@ class UnifiedNewsAnalyzer:
         """
         try:
             from tradingagents.dataflows.cache.app_adapter import get_mongodb_client
-            from datetime import timedelta
 
             # 🔧 确保 max_news 是整数（防止传入浮点数）
             max_news = int(max_news)
@@ -154,17 +162,21 @@ class UnifiedNewsAnalyzer:
             clean_code = stock_code.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
                                    .replace('.XSHE', '').replace('.XSHG', '').replace('.HK', '')
 
-            # 查询最近30天的新闻（扩大时间范围）
-            thirty_days_ago = datetime.now() - timedelta(days=30)
+            if curr_date:
+                analysis_day = datetime.strptime(curr_date, "%Y-%m-%d")
+            else:
+                analysis_day = datetime.now()
+
+            thirty_days_ago = analysis_day - timedelta(days=30)
+            end_of_day = analysis_day + timedelta(days=1)
 
             # 尝试多种查询方式（使用 symbol 字段）
             query_list = [
-                {'symbol': clean_code, 'publish_time': {'$gte': thirty_days_ago}},
-                {'symbol': stock_code, 'publish_time': {'$gte': thirty_days_ago}},
-                {'symbols': clean_code, 'publish_time': {'$gte': thirty_days_ago}},
-                # 如果最近30天没有新闻，则查询所有新闻（不限时间）
-                {'symbol': clean_code},
-                {'symbols': clean_code},
+                {'symbol': clean_code, 'publish_time': {'$gte': thirty_days_ago, '$lt': end_of_day}},
+                {'symbol': stock_code, 'publish_time': {'$gte': thirty_days_ago, '$lt': end_of_day}},
+                {'symbols': clean_code, 'publish_time': {'$gte': thirty_days_ago, '$lt': end_of_day}},
+                {'symbol': clean_code, 'publish_time': {'$lt': end_of_day}},
+                {'symbols': clean_code, 'publish_time': {'$lt': end_of_day}},
             ]
 
             news_items = []
@@ -180,8 +192,10 @@ class UnifiedNewsAnalyzer:
                 return ""
 
             # 格式化新闻
-            report = f"# {stock_code} 最新新闻 (数据库缓存)\n\n"
-            report += f"📅 查询时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            basis_date = curr_date or analysis_day.strftime('%Y-%m-%d')
+            report = f"# {stock_code} 历史新闻数据 (数据库缓存)\n\n"
+            report += f"📅 分析基准日: {basis_date}\n"
+            report += f"📌 新闻截面: 截至 {basis_date} 23:59:59\n"
             report += f"📊 新闻数量: {len(news_items)} 条\n\n"
 
             for i, news in enumerate(news_items, 1):
@@ -323,12 +337,21 @@ class UnifiedNewsAnalyzer:
         # 优先级0: 从数据库获取新闻（最高优先级）
         try:
             logger.info(f"[统一新闻工具] 🔍 优先从数据库获取 {stock_code} 的新闻...")
-            db_news = self._get_news_from_database(stock_code, max_news)
+            db_news = self._get_news_from_database(stock_code, max_news, curr_date)
             if db_news:
                 logger.info(f"[统一新闻工具] ✅ 数据库新闻获取成功: {len(db_news)} 字符")
-                return self._format_news_result(db_news, "数据库缓存", model_info)
+                return self._format_news_result(db_news, "数据库缓存", model_info, curr_date)
             else:
                 logger.info(f"[统一新闻工具] ⚠️ 数据库中没有 {stock_code} 的新闻，尝试同步...")
+
+                if self._is_historical_analysis(curr_date):
+                    logger.info(f"[统一新闻工具] 📅 历史分析模式，跳过实时新闻同步: {stock_code}, curr_date={curr_date}")
+                    placeholder = (
+                        f"# {stock_code} 历史新闻数据\n\n"
+                        f"📅 分析基准日: {curr_date}\n"
+                        "⚠️ 数据库缓存中未命中基准日前新闻，将继续依赖结构化历史数据补充。"
+                    )
+                    return self._format_news_result(placeholder, "历史基准日占位数据", model_info, curr_date)
 
                 # 🔥 数据库没有数据时，调用同步服务同步新闻
                 try:
@@ -338,10 +361,10 @@ class UnifiedNewsAnalyzer:
                     if synced_news:
                         logger.info(f"[统一新闻工具] ✅ 同步成功，重新从数据库获取...")
                         # 重新从数据库获取
-                        db_news = self._get_news_from_database(stock_code, max_news)
+                        db_news = self._get_news_from_database(stock_code, max_news, curr_date)
                         if db_news:
                             logger.info(f"[统一新闻工具] ✅ 同步后数据库新闻获取成功: {len(db_news)} 字符")
-                            return self._format_news_result(db_news, "数据库缓存(新同步)", model_info)
+                            return self._format_news_result(db_news, "数据库缓存(新同步)", model_info, curr_date)
                     else:
                         logger.warning(f"[统一新闻工具] ⚠️ 同步服务未返回新闻数据")
 
@@ -365,7 +388,7 @@ class UnifiedNewsAnalyzer:
                 
                 if result and len(result.strip()) > 100:
                     logger.info(f"[统一新闻工具] ✅ 东方财富新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "东方财富实时新闻", model_info)
+                    return self._format_news_result(result, "东方财富实时新闻", model_info, curr_date)
                 else:
                     logger.warning(f"[统一新闻工具] ⚠️ 东方财富新闻内容过短或为空")
         except Exception as e:
@@ -380,7 +403,7 @@ class UnifiedNewsAnalyzer:
                 result = self.toolkit.get_google_news.invoke({"query": query, "curr_date": curr_date})
                 if result and len(result.strip()) > 50:
                     logger.info(f"[统一新闻工具] ✅ Google新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "Google新闻", model_info)
+                    return self._format_news_result(result, "Google新闻", model_info, curr_date)
         except Exception as e:
             logger.warning(f"[统一新闻工具] Google新闻获取失败: {e}")
         
@@ -392,7 +415,7 @@ class UnifiedNewsAnalyzer:
                 result = self.toolkit.get_global_news_openai.invoke({"curr_date": curr_date})
                 if result and len(result.strip()) > 50:
                     logger.info(f"[统一新闻工具] ✅ OpenAI新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "OpenAI全球新闻", model_info)
+                    return self._format_news_result(result, "OpenAI全球新闻", model_info, curr_date)
         except Exception as e:
             logger.warning(f"[统一新闻工具] OpenAI新闻获取失败: {e}")
         
@@ -414,7 +437,7 @@ class UnifiedNewsAnalyzer:
                 result = self.toolkit.get_google_news.invoke({"query": query, "curr_date": curr_date})
                 if result and len(result.strip()) > 50:
                     logger.info(f"[统一新闻工具] ✅ Google港股新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "Google港股新闻", model_info)
+                    return self._format_news_result(result, "Google港股新闻", model_info, curr_date)
         except Exception as e:
             logger.warning(f"[统一新闻工具] Google港股新闻获取失败: {e}")
         
@@ -426,7 +449,7 @@ class UnifiedNewsAnalyzer:
                 result = self.toolkit.get_global_news_openai.invoke({"curr_date": curr_date})
                 if result and len(result.strip()) > 50:
                     logger.info(f"[统一新闻工具] ✅ OpenAI港股新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "OpenAI港股新闻", model_info)
+                    return self._format_news_result(result, "OpenAI港股新闻", model_info, curr_date)
         except Exception as e:
             logger.warning(f"[统一新闻工具] OpenAI港股新闻获取失败: {e}")
         
@@ -438,7 +461,7 @@ class UnifiedNewsAnalyzer:
                 result = self.toolkit.get_realtime_stock_news.invoke({"ticker": stock_code, "curr_date": curr_date})
                 if result and len(result.strip()) > 100:
                     logger.info(f"[统一新闻工具] ✅ 实时港股新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "实时港股新闻", model_info)
+                    return self._format_news_result(result, "实时港股新闻", model_info, curr_date)
         except Exception as e:
             logger.warning(f"[统一新闻工具] 实时港股新闻获取失败: {e}")
         
@@ -459,7 +482,7 @@ class UnifiedNewsAnalyzer:
                 result = self.toolkit.get_global_news_openai.invoke({"curr_date": curr_date})
                 if result and len(result.strip()) > 50:
                     logger.info(f"[统一新闻工具] ✅ OpenAI美股新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "OpenAI美股新闻", model_info)
+                    return self._format_news_result(result, "OpenAI美股新闻", model_info, curr_date)
         except Exception as e:
             logger.warning(f"[统一新闻工具] OpenAI美股新闻获取失败: {e}")
         
@@ -472,7 +495,7 @@ class UnifiedNewsAnalyzer:
                 result = self.toolkit.get_google_news.invoke({"query": query, "curr_date": curr_date})
                 if result and len(result.strip()) > 50:
                     logger.info(f"[统一新闻工具] ✅ Google美股新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "Google美股新闻", model_info)
+                    return self._format_news_result(result, "Google美股新闻", model_info, curr_date)
         except Exception as e:
             logger.warning(f"[统一新闻工具] Google美股新闻获取失败: {e}")
         
@@ -484,15 +507,15 @@ class UnifiedNewsAnalyzer:
                 result = self.toolkit.get_finnhub_news.invoke({"symbol": stock_code, "max_results": min(max_news, 50)})
                 if result and len(result.strip()) > 50:
                     logger.info(f"[统一新闻工具] ✅ FinnHub美股新闻获取成功: {len(result)} 字符")
-                    return self._format_news_result(result, "FinnHub美股新闻", model_info)
+                    return self._format_news_result(result, "FinnHub美股新闻", model_info, curr_date)
         except Exception as e:
             logger.warning(f"[统一新闻工具] FinnHub美股新闻获取失败: {e}")
         
         return "❌ 无法获取美股新闻数据，所有新闻源均不可用"
     
-    def _format_news_result(self, news_content: str, source: str, model_info: str = "") -> str:
+    def _format_news_result(self, news_content: str, source: str, model_info: str = "", curr_date: str = "") -> str:
         """格式化新闻结果"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        basis_date = curr_date or datetime.now().strftime("%Y-%m-%d")
         
         # 🔍 添加调试日志：打印原始新闻内容
         logger.info(f"[统一新闻工具] 📋 原始新闻内容预览 (前500字符): {news_content[:500]}")
@@ -567,7 +590,7 @@ class UnifiedNewsAnalyzer:
         
         formatted_result = f"""
 === 📰 新闻数据来源: {source} ===
-获取时间: {timestamp}
+分析基准日: {basis_date}
 数据长度: {len(news_content)} 字符
 {f"模型类型: {model_info}" if model_info else ""}
 {f"🔧 Google模型长度控制已应用 (原长度: {original_length} 字符)" if google_control_applied else ""}
@@ -578,7 +601,7 @@ class UnifiedNewsAnalyzer:
 === ✅ 数据状态 ===
 状态: 成功获取
 来源: {source}
-时间戳: {timestamp}
+分析基准日: {basis_date}
 """
         return formatted_result.strip()
 

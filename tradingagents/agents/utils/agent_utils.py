@@ -637,7 +637,11 @@ class Toolkit:
             analyzer = OptimizedChinaDataProvider()
 
             # 生成真正的基本面分析报告
-            fundamentals_report = analyzer._generate_fundamentals_report(ticker, stock_data)
+            fundamentals_report = analyzer._generate_fundamentals_report(
+                ticker,
+                stock_data,
+                analysis_date=curr_date,
+            )
 
             logger.debug(f"📊 [DEBUG] 中国基本面分析报告生成完成")
             logger.debug(f"📊 [DEBUG] get_china_fundamentals 结果长度: {len(fundamentals_report)}")
@@ -885,7 +889,12 @@ class Toolkit:
                     logger.info(f"🔍 [股票代码追踪] 调用 OptimizedChinaDataProvider._generate_fundamentals_report，传入参数: ticker='{ticker}', analysis_modules='{analysis_modules}'")
 
                     # 传递分析模块参数到基本面分析方法
-                    fundamentals_data = analyzer._generate_fundamentals_report(ticker, current_price_data, analysis_modules)
+                    fundamentals_data = analyzer._generate_fundamentals_report(
+                        ticker,
+                        current_price_data,
+                        analysis_modules,
+                        analysis_date=curr_date,
+                    )
 
                     # 🔍 调试：打印返回数据的前500字符
                     logger.info(f"🔍 [基本面工具调试] A股基本面数据返回长度: {len(fundamentals_data)}")

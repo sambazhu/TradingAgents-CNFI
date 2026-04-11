@@ -159,7 +159,7 @@ def format_announcement_section(table_markdown: str) -> str:
     return section
 
 
-def format_research_viewpoints_section(table_markdown: str) -> str:
+def format_research_viewpoints_section(table_markdown: str, trade_date: str = "") -> str:
     """格式化券商研究观点章节"""
     rows = parse_markdown_table(table_markdown)
     if len(rows) < 2:
@@ -171,8 +171,42 @@ def format_research_viewpoints_section(table_markdown: str) -> str:
         idx = find_column(headers, keywords)
         return row[idx].strip() if idx is not None and idx < len(row) else ""
 
+    cutoff_date = None
+    if trade_date:
+        try:
+            cutoff_date = datetime.strptime(trade_date, "%Y-%m-%d").date()
+        except ValueError:
+            cutoff_date = None
+
+    filtered_rows = []
+    for row in rows[1:]:
+        if cutoff_date is None:
+            filtered_rows.append(row)
+            continue
+
+        pub_time = get_str(row, ['研报发布时间', '发布时间'])
+        if not pub_time:
+            filtered_rows.append(row)
+            continue
+
+        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", pub_time)
+        if not date_match:
+            filtered_rows.append(row)
+            continue
+
+        try:
+            pub_date = datetime.strptime(date_match.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            filtered_rows.append(row)
+            continue
+
+        if pub_date <= cutoff_date:
+            filtered_rows.append(row)
+
     # 按日期降序取最近的观点，最多 8 条
-    display_rows = rows[1:min(9, len(rows))]
+    display_rows = filtered_rows[:8]
+    if not display_rows:
+        return ""
 
     section = "### 券商研究观点（数据源：恒生聚源）\n\n"
 
@@ -322,7 +356,7 @@ def enrich_news_report(symbol: str, trade_date: str, existing_report: str,
         try:
             research = client.get_corporate_research(symbol)
             if research:
-                section = format_research_viewpoints_section(research)
+                section = format_research_viewpoints_section(research, trade_date)
                 if section:
                     enrichment_parts.append(section)
                     logger.info(f"Gildata 研究观点附加成功: {symbol}")

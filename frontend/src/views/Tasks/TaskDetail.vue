@@ -151,25 +151,105 @@
           </div>
 
           <div class="graph-section">
-            <div class="graph-label">完整执行顺序</div>
-            <div v-if="executionSteps.length" class="execution-flow horizontal">
-              <div
-                v-for="(step, index) in executionSteps"
-                :key="`${step.title}-${index}`"
-                :class="['flow-step', step.status]"
-              >
-                <div class="flow-title">{{ step.title }}</div>
-                <div class="flow-desc">{{ step.description }}</div>
-                <div
-                  v-if="index < executionSteps.length - 1"
-                  :class="['flow-connector', 'horizontal', step.status]"
-                >
-                  <span class="flow-connector-line"></span>
-                  <span class="flow-arrow horizontal">→</span>
+            <div class="graph-section-header">
+              <div class="graph-label">真实 LangGraph 节点图</div>
+              <div class="graph-helper">{{ actualGraphNodeCount }} 个节点，不含 START / END</div>
+            </div>
+            <div class="langgraph-board">
+              <div class="graph-banner">
+                <span class="graph-banner-chip">{{ langGraphBannerText }}</span>
+                <span class="graph-banner-text">{{ langGraphBannerSubtext }}</span>
+              </div>
+
+              <div class="graph-lane">
+                <div class="graph-lane-title">分析师主链</div>
+                <div class="graph-node-row">
+                  <span :class="getGraphNodeClasses('START', 'endpoint')">START</span>
+                  <template v-for="node in actualGraphPrimaryFlow" :key="node.key">
+                    <span class="graph-arrow">→</span>
+                    <span :class="getGraphNodeClasses(node.nodeName, node.tone)">{{ node.label }}</span>
+                  </template>
+                </div>
+              </div>
+
+              <div v-if="actualGraphToolLoops.length" class="graph-lane">
+                <div class="graph-lane-title">工具循环</div>
+                <div class="graph-tool-grid">
+                  <div v-for="item in actualGraphToolLoops" :key="item.key" class="graph-tool-item">
+                    <span :class="getGraphNodeClasses(item.analystNode, 'analyst')">{{ item.analystNode }}</span>
+                    <span class="graph-arrow loop">↔</span>
+                    <span :class="getGraphNodeClasses(item.toolNode, 'tool')">{{ item.toolNode }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="graph-lane">
+                <div class="graph-lane-title">研究辩论</div>
+                <div class="graph-node-row">
+                  <span :class="getGraphNodeClasses('Bull Researcher', 'research')">Bull Researcher</span>
+                  <span class="graph-arrow loop">↔</span>
+                  <span :class="getGraphNodeClasses('Bear Researcher', 'research')">Bear Researcher</span>
+                  <span class="graph-arrow">→</span>
+                  <span :class="getGraphNodeClasses('Research Manager', 'manager')">Research Manager</span>
+                  <span class="graph-arrow">→</span>
+                  <span :class="getGraphNodeClasses('Trader', 'manager')">Trader</span>
+                </div>
+                <div class="graph-note">条件边：Bull / Bear 会按辩论轮次在两者之间往返，满足条件后流向 Research Manager。</div>
+              </div>
+
+              <div v-if="includeRiskEnabled" class="graph-lane">
+                <div class="graph-lane-title">风险控制</div>
+                <div class="graph-node-row">
+                  <span :class="getGraphNodeClasses('Trader', 'manager')">Trader</span>
+                  <span class="graph-arrow">→</span>
+                  <span :class="getGraphNodeClasses('Risky Analyst', 'risk')">Risky Analyst</span>
+                  <span class="graph-arrow">→</span>
+                  <span :class="getGraphNodeClasses('Safe Analyst', 'risk')">Safe Analyst</span>
+                  <span class="graph-arrow">→</span>
+                  <span :class="getGraphNodeClasses('Neutral Analyst', 'risk')">Neutral Analyst</span>
+                  <span class="graph-arrow">→</span>
+                  <span :class="getGraphNodeClasses('Risk Judge', 'manager')">Risk Judge</span>
+                  <span class="graph-arrow">→</span>
+                  <span :class="getGraphNodeClasses('END', 'endpoint')">END</span>
+                </div>
+                <div class="graph-note">条件边：Risky / Safe / Neutral 达到讨论上限后都可直接进入 Risk Judge；Neutral Analyst 也可回到 Risky Analyst 继续循环。</div>
+              </div>
+
+              <div v-else class="graph-lane">
+                <div class="graph-lane-title">图终点</div>
+                <div class="graph-node-row">
+                  <span :class="getGraphNodeClasses('Trader', 'manager')">Trader</span>
+                  <span class="graph-arrow">→</span>
+                  <span :class="getGraphNodeClasses('END', 'endpoint')">END</span>
                 </div>
               </div>
             </div>
-            <div v-else class="graph-empty">暂无链路信息</div>
+          </div>
+
+          <div class="graph-section">
+            <div class="graph-section-header">
+              <div class="graph-label">产品执行进度</div>
+              <div class="graph-helper">{{ executionSteps.length }} 步，来自后端 Progress Tracker</div>
+            </div>
+            <div v-if="executionSteps.length" class="progress-chain-board">
+              <div class="graph-banner">
+                <span class="graph-banner-chip">{{ progressBannerText }}</span>
+                <span class="graph-banner-text">{{ progressBannerSubtext }}</span>
+              </div>
+
+              <div class="progress-step-grid">
+                <div
+                  v-for="(step, index) in executionSteps"
+                  :key="`${step.title}-${index}`"
+                  :class="['progress-step-card', step.status]"
+                >
+                  <div class="progress-step-index">{{ index + 1 }}</div>
+                  <div class="progress-step-title">{{ step.title }}</div>
+                  <div class="progress-step-desc">{{ step.description }}</div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="graph-empty">暂无进度步骤</div>
           </div>
         </el-card>
       </el-col>
@@ -263,6 +343,42 @@ const resultDecision = computed(() => resultPayload.value?.decision || null)
 const resultSummary = computed(() => resultPayload.value?.summary || '')
 const resultRecommendation = computed(() => resultPayload.value?.recommendation || '')
 
+type StepStatus = 'pending' | 'completed' | 'current'
+type ExecutionStep = {
+  title: string
+  description: string
+  status: StepStatus
+}
+type RawExecutionStep = {
+  title: string
+  description: string
+  rawStatus: string
+}
+type GraphTone = 'endpoint' | 'analyst' | 'tool' | 'system' | 'research' | 'manager' | 'risk'
+
+const ANALYST_GRAPH_META: Record<string, { analyst: string; tool: string; clear: string }> = {
+  market: {
+    analyst: 'Market Analyst',
+    tool: 'tools_market',
+    clear: 'Msg Clear Market'
+  },
+  fundamentals: {
+    analyst: 'Fundamentals Analyst',
+    tool: 'tools_fundamentals',
+    clear: 'Msg Clear Fundamentals'
+  },
+  news: {
+    analyst: 'News Analyst',
+    tool: 'tools_news',
+    clear: 'Msg Clear News'
+  },
+  social: {
+    analyst: 'Social Analyst',
+    tool: 'tools_social',
+    clear: 'Msg Clear Social'
+  }
+}
+
 const submittedAnalystIds = computed<string[]>(() => {
   const parameters = taskData.value?.parameters || {}
   if (Array.isArray(parameters.selected_analysts)) {
@@ -275,6 +391,7 @@ const submittedAnalystIds = computed<string[]>(() => {
 })
 
 const submittedAnalystNames = computed(() => convertAnalystIdsToNames(submittedAnalystIds.value))
+const includeRiskEnabled = computed(() => (taskData.value?.parameters || {}).include_risk !== false)
 
 const getDebateRounds = (researchDepth: string) => {
   if (['快速', '基础', '标准'].includes(researchDepth)) return 1
@@ -283,34 +400,35 @@ const getDebateRounds = (researchDepth: string) => {
   return 1
 }
 
-const buildDerivedExecutionSteps = () => {
+const buildDerivedExecutionSteps = (): Array<Omit<ExecutionStep, 'status'>> => {
   const parameters = taskData.value?.parameters || {}
   const researchDepth = parameters.research_depth || taskData.value?.research_depth || '标准'
   const includeRisk = parameters.include_risk !== false
   const analystStepMap: Record<string, { title: string; description: string }> = {
     market: {
       title: '📊 市场分析师',
-      description: '分析股价走势、量价结构与技术指标'
+      description: '分析股价走势、成交量、技术指标等市场表现'
     },
     fundamentals: {
       title: '💼 基本面分析师',
-      description: '分析财务质量、估值水平与经营基本面'
+      description: '分析公司财务状况、盈利能力、成长性等基本面'
     },
     news: {
       title: '📰 新闻分析师',
-      description: '分析新闻、公告与行业事件影响'
+      description: '分析相关新闻、公告、行业动态对股价的影响'
     },
     social: {
       title: '💬 社交媒体分析师',
-      description: '分析股吧、舆情与市场情绪变化'
+      description: '分析社交媒体讨论、网络热度、散户情绪等'
     }
   }
 
-  const steps: Array<{ title: string; description: string }> = [
-    {
-      title: '📋 准备阶段',
-      description: '验证股票代码并初始化分析引擎'
-    }
+  const steps: Array<Omit<ExecutionStep, 'status'>> = [
+    { title: '📋 准备阶段', description: '验证股票代码，检查数据源可用性' },
+    { title: '🔧 环境检查', description: '检查API密钥配置，确保数据获取正常' },
+    { title: '💰 成本估算', description: '根据分析深度预估API调用成本' },
+    { title: '⚙️ 参数设置', description: '配置分析参数和AI模型选择' },
+    { title: '🚀 启动引擎', description: '初始化AI分析引擎，准备开始分析' }
   ]
 
   submittedAnalystIds.value.forEach((analystId) => {
@@ -323,29 +441,29 @@ const buildDerivedExecutionSteps = () => {
   steps.push(
     {
       title: '🐂 看涨研究员',
-      description: '基于分析师报告构建看多论据'
+      description: '基于分析师报告构建买入论据'
     },
     {
       title: '🐻 看跌研究员',
-      description: '识别潜在风险并构建看空论据'
+      description: '识别潜在风险和问题'
     }
   )
 
   for (let index = 0; index < getDebateRounds(researchDepth); index += 1) {
     steps.push({
       title: `🎯 研究辩论 第${index + 1}轮`,
-      description: '多空研究员围绕核心观点进行辩论'
+      description: '多头空头研究员深度辩论'
     })
   }
 
   steps.push(
     {
       title: '👔 研究经理',
-      description: '整合研究结论，形成团队共识'
+      description: '综合辩论结果，形成研究共识'
     },
     {
       title: '💼 交易员决策',
-      description: '根据研究结论制定交易策略'
+      description: '基于研究结果制定具体交易策略'
     }
   )
 
@@ -353,19 +471,19 @@ const buildDerivedExecutionSteps = () => {
     steps.push(
       {
         title: '🔥 激进风险评估',
-        description: '从激进视角评估风险与收益弹性'
+        description: '从激进角度评估投资风险'
       },
       {
         title: '🛡️ 保守风险评估',
-        description: '从保守视角评估下行保护与风险暴露'
+        description: '从保守角度评估投资风险'
       },
       {
         title: '⚖️ 中性风险评估',
-        description: '从平衡视角评估风险收益配比'
+        description: '从中性角度评估投资风险'
       },
       {
         title: '🎯 风险经理',
-        description: '汇总风险辩论并给出最终风控意见'
+        description: '综合风险评估，制定风险控制策略'
       }
     )
   }
@@ -390,13 +508,13 @@ const normalizeStepTitle = (value: string) =>
     .trim()
 
 const executionSteps = computed(() => {
-  const rawSteps = Array.isArray(taskData.value?.steps) && taskData.value.steps.length
+  const rawSteps: RawExecutionStep[] = Array.isArray(taskData.value?.steps) && taskData.value.steps.length
     ? taskData.value.steps.map((step: any) => ({
         title: step.name || step.title || '',
         description: step.description || '',
         rawStatus: step.status || 'pending'
       }))
-    : buildDerivedExecutionSteps().map((step) => ({
+    : buildDerivedExecutionSteps().map((step): RawExecutionStep => ({
         ...step,
         rawStatus: 'pending'
       }))
@@ -408,20 +526,26 @@ const executionSteps = computed(() => {
     ''
   )
 
-  return rawSteps.map((step) => {
+  const explicitCurrentIndex = rawSteps.findIndex((step: RawExecutionStep) => {
     const normalizedTitle = normalizeStepTitle(step.title)
-    let status = 'pending'
+    if (!currentStepName || !normalizedTitle) return false
+    return normalizedTitle === currentStepName || currentStepName.includes(normalizedTitle)
+  })
 
-    if (step.rawStatus === 'completed') {
+  return rawSteps.map((step: RawExecutionStep, index: number): ExecutionStep => {
+    let status: StepStatus = 'pending'
+
+    if (normalizedStatus.value === 'completed' && step.rawStatus !== 'failed') {
+      status = 'completed'
+    } else if (explicitCurrentIndex >= 0) {
+      if (index < explicitCurrentIndex) {
+        status = 'completed'
+      } else if (index === explicitCurrentIndex) {
+        status = 'current'
+      }
+    } else if (step.rawStatus === 'completed') {
       status = 'completed'
     } else if (['in_progress', 'current', 'active'].includes(step.rawStatus)) {
-      status = 'current'
-    }
-
-    if (
-      currentStepName &&
-      (normalizedTitle === currentStepName || currentStepName.includes(normalizedTitle))
-    ) {
       status = 'current'
     }
 
@@ -432,6 +556,215 @@ const executionSteps = computed(() => {
     }
   })
 })
+
+const progressCurrentIndex = computed(() =>
+  executionSteps.value.findIndex((step: ExecutionStep) => step.status === 'current')
+)
+
+const progressLastCompletedIndex = computed(() => {
+  for (let index = executionSteps.value.length - 1; index >= 0; index -= 1) {
+    if (executionSteps.value[index].status === 'completed') return index
+  }
+  return -1
+})
+
+const progressBannerText = computed(() => {
+  if (progressCurrentIndex.value >= 0) {
+    return `当前执行到第 ${progressCurrentIndex.value + 1} / ${executionSteps.value.length} 步`
+  }
+  if (normalizedStatus.value === 'completed') {
+    return `已完成，共 ${executionSteps.value.length} 步`
+  }
+  if (progressLastCompletedIndex.value >= 0) {
+    return `已执行到第 ${progressLastCompletedIndex.value + 1} / ${executionSteps.value.length} 步`
+  }
+  return '等待执行'
+})
+
+const progressBannerSubtext = computed(() => {
+  if (progressCurrentIndex.value >= 0) {
+    return `命中步骤：${executionSteps.value[progressCurrentIndex.value].title}`
+  }
+  if (normalizedStatus.value === 'completed' && executionSteps.value.length) {
+    return `最后步骤：${executionSteps.value[executionSteps.value.length - 1].title}`
+  }
+  if (progressLastCompletedIndex.value >= 0) {
+    return `最近完成：${executionSteps.value[progressLastCompletedIndex.value].title}`
+  }
+  return '命中步骤：尚未进入执行阶段'
+})
+
+const actualGraphAnalystItems = computed(() =>
+  submittedAnalystIds.value
+    .map((id) => {
+      const meta = ANALYST_GRAPH_META[id]
+      return meta
+        ? {
+            key: id,
+            analystNode: meta.analyst,
+            toolNode: meta.tool,
+            clearNode: meta.clear
+          }
+        : null
+    })
+    .filter(Boolean) as Array<{ key: string; analystNode: string; toolNode: string; clearNode: string }>
+)
+
+const actualGraphPrimaryFlow = computed(() => {
+  const items: Array<{ key: string; label: string; nodeName: string; tone: GraphTone }> = []
+
+  actualGraphAnalystItems.value.forEach((item) => {
+    items.push(
+      {
+        key: `${item.key}-analyst`,
+        label: item.analystNode,
+        nodeName: item.analystNode,
+        tone: 'analyst'
+      },
+      {
+        key: `${item.key}-clear`,
+        label: item.clearNode,
+        nodeName: item.clearNode,
+        tone: 'system'
+      }
+    )
+  })
+
+  items.push({
+    key: 'bull-entry',
+    label: 'Bull Researcher',
+    nodeName: 'Bull Researcher',
+    tone: 'research'
+  })
+
+  return items
+})
+
+const actualGraphToolLoops = computed(() =>
+  actualGraphAnalystItems.value.map((item) => ({
+    key: `${item.key}-tool-loop`,
+    analystNode: item.analystNode,
+    toolNode: item.toolNode
+  }))
+)
+
+const actualGraphNodeCount = computed(() => {
+  const analystNodeCount = actualGraphAnalystItems.value.length * 3
+  const baseNodeCount = 4
+  const riskNodeCount = includeRiskEnabled.value ? 4 : 0
+  return analystNodeCount + baseNodeCount + riskNodeCount
+})
+
+const getGraphNodesForProgressTitle = (title: string): string[] => {
+  const value = normalizeStepTitle(title)
+
+  if (['准备阶段', '环境检查', '成本估算', '参数设置', '启动引擎'].some((item) => value.includes(item))) {
+    return ['START']
+  }
+  if (value.includes('市场分析师')) {
+    const meta = ANALYST_GRAPH_META.market
+    return [meta.analyst, meta.tool, meta.clear]
+  }
+  if (value.includes('基本面分析师')) {
+    const meta = ANALYST_GRAPH_META.fundamentals
+    return [meta.analyst, meta.tool, meta.clear]
+  }
+  if (value.includes('新闻分析师')) {
+    const meta = ANALYST_GRAPH_META.news
+    return [meta.analyst, meta.tool, meta.clear]
+  }
+  if (value.includes('社交媒体分析师')) {
+    const meta = ANALYST_GRAPH_META.social
+    return [meta.analyst, meta.tool, meta.clear]
+  }
+  if (value.includes('看涨研究员')) return ['Bull Researcher']
+  if (value.includes('看跌研究员')) return ['Bear Researcher']
+  if (value.includes('研究辩论')) return ['Bull Researcher', 'Bear Researcher']
+  if (value.includes('研究经理')) return ['Research Manager']
+  if (value.includes('交易员决策')) return ['Trader']
+  if (value.includes('激进风险评估')) return ['Risky Analyst']
+  if (value.includes('保守风险评估')) return ['Safe Analyst']
+  if (value.includes('中性风险评估')) return ['Neutral Analyst']
+  if (value.includes('风险经理')) return ['Risk Judge']
+  if (['信号处理', '生成报告', '分析完成'].some((item) => value.includes(item))) return ['END']
+  return []
+}
+
+const allLangGraphNodeNames = computed(() => {
+  const names = new Set<string>(['START'])
+  actualGraphAnalystItems.value.forEach((item) => {
+    names.add(item.analystNode)
+    names.add(item.toolNode)
+    names.add(item.clearNode)
+  })
+  names.add('Bull Researcher')
+  names.add('Bear Researcher')
+  names.add('Research Manager')
+  names.add('Trader')
+  if (includeRiskEnabled.value) {
+    names.add('Risky Analyst')
+    names.add('Safe Analyst')
+    names.add('Neutral Analyst')
+    names.add('Risk Judge')
+  }
+  names.add('END')
+  return Array.from(names)
+})
+
+const langGraphNodeStates = computed<Record<string, StepStatus>>(() => {
+  const states = Object.fromEntries(
+    allLangGraphNodeNames.value.map((name) => [name, 'pending' as StepStatus])
+  )
+
+  if (executionSteps.value.length || normalizedStatus.value !== 'pending') {
+    states.START = 'completed'
+  }
+
+  executionSteps.value.forEach((step: ExecutionStep) => {
+    const nodeNames = getGraphNodesForProgressTitle(step.title)
+    nodeNames.forEach((nodeName) => {
+      if (step.status === 'completed') {
+        states[nodeName] = 'completed'
+      } else if (step.status === 'current') {
+        states[nodeName] = 'current'
+      }
+    })
+  })
+
+  if (normalizedStatus.value === 'completed') {
+    allLangGraphNodeNames.value.forEach((name) => {
+      states[name] = 'completed'
+    })
+    states.END = 'completed'
+  }
+
+  return states
+})
+
+const langGraphBannerText = computed(() => {
+  return `真实节点 ${actualGraphNodeCount.value} 个，产品步骤 ${executionSteps.value.length} 步`
+})
+
+const langGraphBannerSubtext = computed(() => {
+  if (normalizedStatus.value === 'completed') {
+    return '当前任务已完成，所有真实 LangGraph 节点均已收口'
+  }
+
+  if (progressCurrentIndex.value >= 0) {
+    const graphNodes = getGraphNodesForProgressTitle(executionSteps.value[progressCurrentIndex.value].title)
+    return graphNodes.length
+      ? `当前语义步骤映射到：${graphNodes.join(' / ')}`
+      : '当前步骤属于图外收尾阶段（如信号处理/生成报告）'
+  }
+
+  return '上方显示真实 LangGraph 节点，下方显示后端 Progress Tracker 的产品步骤'
+})
+
+const getGraphNodeClasses = (nodeName: string, tone: GraphTone) => [
+  'graph-node',
+  `tone-${tone}`,
+  `status-${langGraphNodeStates.value[nodeName] || 'pending'}`
+]
 
 const parameterItems = computed(() => {
   const parameters = taskData.value?.parameters || {}
@@ -669,114 +1002,210 @@ onUnmounted(() => {
     font-size: 13px;
   }
 
-  .execution-flow {
+  .graph-section-header {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .graph-helper {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+
+  .langgraph-board,
+  .progress-chain-board {
+    padding: 16px;
+    border: 1px solid #ebeef5;
+    border-radius: 16px;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.18) 1px, transparent 0),
+      linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    background-size: 18px 18px, auto;
+  }
+
+  .graph-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .graph-banner-chip,
+  .graph-banner-text {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--el-text-color-primary);
+    font-size: 12px;
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.04);
+  }
+
+  .graph-banner-chip {
+    color: #1677ff;
+    border-color: rgba(64, 158, 255, 0.28);
+    background: rgba(230, 244, 255, 0.96);
+    font-weight: 700;
+  }
+
+  .graph-lane + .graph-lane {
+    margin-top: 14px;
+  }
+
+  .graph-lane-title {
+    margin-bottom: 8px;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .graph-node-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .graph-tool-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
   }
 
-  .execution-flow.horizontal {
+  .graph-tool-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .graph-node {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 12px;
+    border: 1px solid #dbe4ee;
+    background: rgba(255, 255, 255, 0.96);
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+  }
+
+  .graph-node.tone-endpoint,
+  .graph-node.tone-system,
+  .graph-node.tone-tool {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+  }
+
+  .graph-node.tone-tool {
+    background: #f8fafc;
+  }
+
+  .graph-node.status-completed {
+    border-color: #b7eb8f;
+    background: #f6ffed;
+    color: #3f8600;
+  }
+
+  .graph-node.status-current {
+    border-color: #91caff;
+    background: #e6f4ff;
+    color: #0958d9;
+    box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.18);
+  }
+
+  .graph-arrow {
+    color: #94a3b8;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .graph-arrow.loop {
+    color: #64748b;
+  }
+
+  .graph-note {
+    margin-top: 8px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .progress-step-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    align-items: stretch;
-    gap: 10px;
-    overflow: visible;
-    padding-bottom: 0;
+    gap: 12px;
   }
 
-  .flow-step {
-    display: flex;
-    flex-direction: column;
-    padding: 10px 12px;
+  .progress-step-card {
+    min-height: 112px;
+    padding: 12px 13px;
     border: 1px solid #ebeef5;
-    border-radius: 12px;
-    background: #fff;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
   }
 
-  .execution-flow.horizontal .flow-step {
-    position: relative;
-    min-height: 90px;
-  }
-
-  .flow-step.completed {
+  .progress-step-card.completed {
     border-color: #b7eb8f;
     background: #f6ffed;
   }
 
-  .flow-step.current {
+  .progress-step-card.current {
     border-color: #91caff;
     background: #e6f4ff;
-    box-shadow: 0 0 0 1px rgba(24, 144, 255, 0.12);
+    box-shadow:
+      0 0 0 1px rgba(24, 144, 255, 0.12),
+      0 10px 24px rgba(22, 119, 255, 0.12);
   }
 
-  .flow-title {
+  .progress-step-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .progress-step-card.completed .progress-step-index {
+    background: #dcfce7;
+    color: #15803d;
+  }
+
+  .progress-step-card.current .progress-step-index {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
+  .progress-step-title {
+    margin-top: 8px;
     color: var(--el-text-color-primary);
     font-size: 14px;
     font-weight: 600;
+    line-height: 1.35;
   }
 
-  .flow-desc {
-    margin-top: 4px;
+  .progress-step-desc {
+    margin-top: 6px;
     color: var(--el-text-color-secondary);
     font-size: 12px;
-    line-height: 1.45;
-  }
-
-  .flow-connector {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: auto;
-    padding-top: 10px;
-  }
-
-  .flow-connector-line {
-    flex: 1;
-    height: 2px;
-    border-radius: 999px;
-    background: #dcdfe6;
-  }
-
-  .flow-connector.completed .flow-connector-line {
-    background: #95de64;
-  }
-
-  .flow-connector.current .flow-connector-line {
-    background: #409eff;
-  }
-
-  .flow-arrow {
-    text-align: center;
-    color: var(--el-text-color-secondary);
-    font-size: 16px;
-  }
-
-  .flow-arrow.horizontal {
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border: 1px solid #e5e7eb;
-    border-radius: 999px;
-    background: #fff;
-    color: var(--el-text-color-secondary);
-    line-height: 1;
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
-  }
-
-  .flow-connector.completed .flow-arrow.horizontal {
-    border-color: #95de64;
-    color: #52c41a;
-    background: #f6ffed;
-  }
-
-  .flow-connector.current .flow-arrow.horizontal {
-    border-color: #409eff;
-    color: #1677ff;
-    background: #e6f4ff;
-    box-shadow: 0 4px 12px rgba(22, 119, 255, 0.18);
+    line-height: 1.5;
   }
 
   .decision-card {
@@ -824,7 +1253,7 @@ onUnmounted(() => {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .execution-flow.horizontal {
+    .progress-step-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
@@ -838,7 +1267,11 @@ onUnmounted(() => {
       grid-template-columns: 1fr;
     }
 
-    .execution-flow.horizontal {
+    .graph-tool-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .progress-step-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -848,7 +1281,7 @@ onUnmounted(() => {
   }
 
   @media (max-width: 520px) {
-    .execution-flow.horizontal {
+    .progress-step-grid {
       grid-template-columns: 1fr;
     }
   }
