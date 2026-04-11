@@ -215,15 +215,114 @@ def create_social_media_analyst(llm, toolkit):
             )
         else:
             # 非Google模型的处理逻辑
-            logger.debug(f"📊 [DEBUG] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
+            logger.info(f"📊 [社交媒体分析师] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
             
             report = ""
-            if len(result.tool_calls) == 0:
+            if hasattr(result, 'tool_calls') and len(result.tool_calls) == 0:
+                # 没有工具调用，直接使用LLM的回复
                 report = result.content
+                logger.info(f"📊 [社交媒体分析师] ✅ 直接回复（无工具调用），报告长度: {len(report)}")
+            else:
+                # 🔧 修复：有工具调用时，在node内部手动执行工具并生成报告
+                # 避免依赖 LangGraph 循环（循环会被死循环保护截断导致报告丢失）
+                logger.info(f"📊 [社交媒体分析师] 🔧 检测到工具调用，在node内部执行工具并生成报告")
+                
+                try:
+                    from langchain_core.messages import ToolMessage, HumanMessage, AIMessage
+                    
+                    # 执行工具调用获取情绪数据
+                    tool_messages = []
+                    for tool_call in result.tool_calls:
+                        tool_name = tool_call.get('name')
+                        tool_args = tool_call.get('args', {})
+                        tool_id = tool_call.get('id')
+                        
+                        logger.info(f"📊 [社交媒体分析师] 执行工具: {tool_name}, 参数: {tool_args}")
+                        
+                        tool_result = None
+                        for tool in tools:
+                            current_tool_name = getattr(tool, 'name', None) or getattr(tool, '__name__', None)
+                            if current_tool_name == tool_name:
+                                try:
+                                    tool_result = tool.invoke(tool_args)
+                                    logger.info(f"📊 [社交媒体分析师] ✅ 工具执行成功，结果长度: {len(str(tool_result))}")
+                                    break
+                                except Exception as tool_error:
+                                    logger.error(f"❌ [社交媒体分析师] 工具执行失败: {tool_error}")
+                                    tool_result = f"工具执行失败: {str(tool_error)}"
+                        
+                        if tool_result is None:
+                            tool_result = f"未找到工具: {tool_name}"
+                        
+                        tool_message = ToolMessage(
+                            content=str(tool_result),
+                            tool_call_id=tool_id
+                        )
+                        tool_messages.append(tool_message)
+                    
+                    # 基于工具结果生成完整情绪分析报告
+                    analysis_prompt = f"""请基于上述工具获取的情绪数据，为 {company_name}（{ticker}）生成详细的社交媒体情绪分析报告。
 
-        # 🔧 更新工具调用计数器
+报告必须包含：
+1. 投资者情绪总结（乐观/悲观/中性）
+2. 主要财经平台的讨论热度分析
+3. 关键意见领袖(KOL)和机构观点
+4. 情绪指数评分（1-10分）
+5. 预期价格波动幅度
+6. 基于情绪的交易时机建议
+
+请在报告末尾附上Markdown表格总结关键发现。使用中文撰写。"""
+                    
+                    # 构建完整消息序列
+                    messages_for_analysis = state["messages"] + [result] + tool_messages + [HumanMessage(content=analysis_prompt)]
+                    
+                    # 生成最终分析报告
+                    final_result = llm.invoke(messages_for_analysis)
+                    report = final_result.content
+                    
+                    logger.info(f"📊 [社交媒体分析师] ✅ 工具调用模式成功，报告长度: {len(report)}")
+                    
+                    # 返回包含工具调用和最终分析的完整消息序列
+                    clean_message = AIMessage(content=report)
+                    return {
+                        "messages": [clean_message],
+                        "sentiment_report": report,
+                        "sentiment_tool_call_count": tool_call_count + 1
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"❌ [社交媒体分析师] 工具执行或分析生成失败: {e}")
+                    import traceback
+                    logger.error(f"❌ [社交媒体分析师] 详细错误: {traceback.format_exc()}")
+                    
+                    # 降级方案1：尝试从 result.content 中提取报告
+                    if hasattr(result, 'content') and result.content and len(result.content) > 50:
+                        report = result.content
+                        logger.info(f"📊 [社交媒体分析师] ⚠️ 降级使用LLM原始内容，长度: {len(report)}")
+                    else:
+                        # 降级方案2：直接调用情绪工具获取数据并生成报告
+                        logger.info(f"📊 [社交媒体分析师] ⚠️ 启动最终降级方案...")
+                        try:
+                            sentiment_data = tools[0].invoke({"ticker": ticker, "curr_date": current_date})
+                            if sentiment_data and len(str(sentiment_data)) > 50:
+                                from langchain_core.messages import AIMessage
+                                fallback_prompt = f"请基于以下数据为{company_name}({ticker})生成简要情绪分析报告：\n{sentiment_data}"
+                                fallback_result = llm.invoke([{"role": "user", "content": fallback_prompt}])
+                                report = fallback_result.content if hasattr(fallback_result, 'content') else str(sentiment_data)
+                                logger.info(f"📊 [社交媒体分析师] ✅ 最终降级方案成功，报告长度: {len(report)}")
+                            else:
+                                report = f"社交媒体情绪分析：{company_name}({ticker}) - 情绪数据获取受限，无法完成完整分析。"
+                        except Exception as fallback_error:
+                            logger.error(f"❌ [社交媒体分析师] 最终降级方案也失败: {fallback_error}")
+                            report = f"社交媒体情绪分析：{company_name}({ticker}) - 分析过程出现异常，请稍后重试。"
+
+        # 🔧 返回清洁消息（不包含 tool_calls），避免 LangGraph 循环
+        from langchain_core.messages import AIMessage
+        clean_message = AIMessage(content=report)
+        logger.info(f"📊 [社交媒体分析师] ✅ 最终返回报告长度: {len(report)}")
+
         return {
-            "messages": [result],
+            "messages": [clean_message],
             "sentiment_report": report,
             "sentiment_tool_call_count": tool_call_count + 1
         }
