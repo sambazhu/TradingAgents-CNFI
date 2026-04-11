@@ -648,7 +648,11 @@ class SimpleAnalysisService:
         message: str,
         current_step_description: str = "",
     ):
-        """异步更新进度（内存和MongoDB）"""
+        """异步更新进度（内存和MongoDB）
+
+        除了覆盖 current_step 外，还会将每个步骤追加到 steps 数组中，
+        确保前端即使轮询间隔较大（5s），也能看到所有已完成的步骤。
+        """
         try:
             # 更新内存
             await self.memory_manager.update_task_status(
@@ -665,6 +669,7 @@ class SimpleAnalysisService:
             from app.core.database import get_mongo_db
             from datetime import datetime
             db = get_mongo_db()
+            now = datetime.utcnow()
             await db.analysis_tasks.update_one(
                 {"task_id": task_id},
                 {
@@ -674,11 +679,21 @@ class SimpleAnalysisService:
                         "current_step_name": message,
                         "current_step_description": current_step_description,
                         "message": message,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": now
+                    },
+                    # 🔧 P1修复：追加步骤到 steps 数组，让前端能看到完整的步骤历史
+                    "$push": {
+                        "steps": {
+                            "name": message,
+                            "title": message,
+                            "description": current_step_description,
+                            "status": "completed",
+                            "timestamp": now.isoformat()
+                        }
                     }
                 }
             )
-            logger.debug(f"✅ [异步更新] 已更新内存和MongoDB: {progress}%")
+            logger.debug(f"✅ [异步更新] 已更新内存和MongoDB: {progress}% - {message}")
         except Exception as e:
             logger.warning(f"⚠️ [异步更新] 失败: {e}")
 
