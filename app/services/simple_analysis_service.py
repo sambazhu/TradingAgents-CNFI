@@ -1749,7 +1749,7 @@ class SimpleAnalysisService:
                         elif isinstance(debate_state, dict) and 'judge_decision' in debate_state:
                             decision_content = debate_state['judge_decision']
                         else:
-                            decision_content = str(debate_state)
+                            decision_content = ""
 
                         if decision_content and len(decision_content.strip()) > 10:
                             reports['research_team_decision'] = decision_content.strip()
@@ -1801,7 +1801,8 @@ class SimpleAnalysisService:
                         elif isinstance(risk_state, dict) and 'judge_decision' in risk_state:
                             risk_decision = risk_state['judge_decision']
                         else:
-                            risk_decision = str(risk_state)
+                            # 空 dict 或无 judge_decision → 不保存，避免显示原始 dict 字符串
+                            risk_decision = ""
 
                         if risk_decision and len(risk_decision.strip()) > 10:
                             reports['risk_management_decision'] = risk_decision.strip()
@@ -2626,7 +2627,7 @@ class SimpleAnalysisService:
                             elif isinstance(debate_state, dict) and 'judge_decision' in debate_state:
                                 decision_content = debate_state['judge_decision']
                             else:
-                                decision_content = str(debate_state)
+                                decision_content = ""
 
                             if decision_content and len(decision_content.strip()) > 10:
                                 reports['research_team_decision'] = decision_content.strip()
@@ -2674,7 +2675,7 @@ class SimpleAnalysisService:
                             elif isinstance(risk_state, dict) and 'judge_decision' in risk_state:
                                 risk_decision = risk_state['judge_decision']
                             else:
-                                risk_decision = str(risk_state)
+                                risk_decision = ""
 
                             if risk_decision and len(risk_decision.strip()) > 10:
                                 reports['risk_management_decision'] = risk_decision.strip()
@@ -2760,7 +2761,7 @@ class SimpleAnalysisService:
                 "stock_name": stock_name,  # 🔥 添加股票名称字段
                 "market_type": market_type,  # 🔥 添加市场类型字段
                 "model_info": result.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
-                "analysis_date": timestamp.strftime('%Y-%m-%d'),
+                "analysis_date": result.get('analysis_date') or timestamp.strftime('%Y-%m-%d'),
                 "timestamp": timestamp,
                 "status": "completed",
                 "source": "api",
@@ -3001,6 +3002,14 @@ class SimpleAnalysisService:
                         module_content = state[state_key]
                         if isinstance(module_content, str):
                             report_content = module_content
+                        elif isinstance(module_content, dict):
+                            # 辩论状态等字典类型，提取关键内容
+                            if state_key == 'investment_debate_state':
+                                report_content = module_content.get('judge_decision', '') or module_content.get('current_response', '')
+                            elif state_key == 'risk_debate_state':
+                                report_content = module_content.get('judge_decision', '')
+                            else:
+                                report_content = str(module_content)
                         else:
                             report_content = str(module_content)
 
