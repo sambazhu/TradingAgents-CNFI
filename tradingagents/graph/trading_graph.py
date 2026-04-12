@@ -1135,7 +1135,13 @@ class TradingAgentsGraph:
             model_info = "Unknown"
 
         # 处理决策并添加模型信息
-        decision = self.process_signal(final_state["final_trade_decision"], company_name)
+        # 优先使用 final_trade_decision（风险评估后），否则回退到 Research Manager 的 investment_plan
+        decision_signal = final_state.get("final_trade_decision", "")
+        if not decision_signal or not isinstance(decision_signal, str) or len(decision_signal.strip()) < 10:
+            decision_signal = final_state.get("investment_plan", "")
+            if decision_signal:
+                logger.info(f"📊 [Trader] 未选择风险评估，使用 Research Manager 输出生成决策")
+        decision = self.process_signal(decision_signal, company_name)
         decision['model_info'] = model_info
 
         # Return decision and processed signal
