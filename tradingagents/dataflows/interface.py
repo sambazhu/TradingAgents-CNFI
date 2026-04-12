@@ -815,47 +815,6 @@ def get_stockstats_indicator(
     return str(indicator_value)
 
 
-def get_YFin_data_window(
-    symbol: Annotated[str, "ticker symbol of the company"],
-    curr_date: Annotated[str, "Start date in yyyy-mm-dd format"],
-    look_back_days: Annotated[int, "how many days to look back"],
-) -> str:
-    # calculate past days
-    date_obj = datetime.strptime(curr_date, "%Y-%m-%d")
-    before = date_obj - relativedelta(days=look_back_days)
-    start_date = before.strftime("%Y-%m-%d")
-
-    # read in data
-    data = pd.read_csv(
-        os.path.join(
-            DATA_DIR,
-            f"market_data/price_data/{symbol}-YFin-data-2015-01-01-2025-03-25.csv",
-        )
-    )
-
-    # Extract just the date part for comparison
-    data["DateOnly"] = data["Date"].str[:10]
-
-    # Filter data between the start and end dates (inclusive)
-    filtered_data = data[
-        (data["DateOnly"] >= start_date) & (data["DateOnly"] <= curr_date)
-    ]
-
-    # Drop the temporary column we created
-    filtered_data = filtered_data.drop("DateOnly", axis=1)
-
-    # Set pandas display options to show the full DataFrame
-    with pd.option_context(
-        "display.max_rows", None, "display.max_columns", None, "display.width", None
-    ):
-        df_string = filtered_data.to_string()
-
-    return (
-        f"## Raw Market Data for {symbol} from {start_date} to {curr_date}:\n\n"
-        + df_string
-    )
-
-
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
@@ -1716,31 +1675,6 @@ def switch_china_data_source(
     except Exception as e:
         logger.error(f"❌ 数据源切换失败: {e}")
         return f"❌ 数据源切换失败: {e}"
-
-
-def get_current_china_data_source() -> str:
-    """
-    获取当前中国股票数据源
-
-    Returns:
-        str: 当前数据源信息
-    """
-    try:
-        from .data_source_manager import get_data_source_manager
-
-        manager = get_data_source_manager()
-        current = manager.get_current_source()
-        available = manager.available_sources
-
-        result = f"当前数据源: {current.value}\n"
-        result += f"可用数据源: {[s.value for s in available]}\n"
-        result += f"默认数据源: {manager.default_source.value}\n"
-
-        return result
-
-    except Exception as e:
-        logger.error(f"❌ 获取数据源信息失败: {e}")
-        return f"❌ 获取数据源信息失败: {e}"
 
 
 # ==================== 港股数据接口 ====================

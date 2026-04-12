@@ -68,7 +68,6 @@ from .interface import (
     get_stock_stats_indicators_window,
     get_stockstats_indicator,
     # Market data functions
-    get_YFin_data_window,
     get_YFin_data,
     # Tushare data functions
     get_china_stock_data_tushare,
@@ -77,7 +76,6 @@ from .interface import (
     get_china_stock_data_unified,
     get_china_stock_info_unified,
     switch_china_data_source,
-    get_current_china_data_source,
     # Hong Kong stock functions
     get_hk_stock_data_unified,
     get_hk_stock_info_unified,
@@ -100,7 +98,6 @@ __all__ = [
     "get_stock_stats_indicators_window",
     "get_stockstats_indicator",
     # Market data functions
-    "get_YFin_data_window",
     "get_YFin_data",
     # Tushare data functions
     "get_china_stock_data_tushare",
@@ -109,7 +106,6 @@ __all__ = [
     "get_china_stock_data_unified",
     "get_china_stock_info_unified",
     "switch_china_data_source",
-    "get_current_china_data_source",
     # Hong Kong stock functions
     "get_hk_stock_data_unified",
     "get_hk_stock_info_unified",
